@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS local_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);

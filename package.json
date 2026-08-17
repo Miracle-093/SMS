@@ -1,0 +1,34 @@
+{
+  "name": "aethina-sms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aethina School Management System monorepo",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "db:start": "docker compose --env-file .env -f infrastructure/docker-compose.yml up -d postgres",
+    "db:stop": "docker compose --env-file .env -f infrastructure/docker-compose.yml down",
+    "db:migrate": "npm run prisma:migrate --workspace apps/api",
+    "db:migrate:deploy": "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma",
+    "db:seed": "npm run prisma:seed --workspace apps/api",
+    "db:reset:dev": "npm run db:reset:dev --workspace apps/api",
+    "api:dev": "npm run start:dev --workspace apps/api",
+    "desktop:dev": "npm run tauri:dev --workspace apps/desktop",
+    "portal:dev": "npm run dev --workspace apps/portal",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "build:vercel:api": "npm run build:vercel --workspace apps/api",
+    "build:vercel:portal": "npm run build --workspace apps/portal",
+    "demo": "powershell -ExecutionPolicy Bypass -File scripts/Start-Aethina-Demo.ps1",
+    "demo:urls": "powershell -ExecutionPolicy Bypass -File scripts/Print-Aethina-LanUrls.ps1",
+    "backup:sqlite": "powershell -ExecutionPolicy Bypass -File scripts/Backup-Aethina-Sqlite.ps1",
+    "offline:test": "npm run offline:test --workspace apps/api",
+    "offline:smoke": "npm run offline:smoke --workspace apps/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

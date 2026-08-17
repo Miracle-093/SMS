@@ -1,0 +1,23 @@
+{
+  "name": "@aethina/portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5174",
+    "build": "tsc -p tsconfig.json && vite build",
+    "test": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aethina/shared-types": "0.1.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.1"
+  }
+}

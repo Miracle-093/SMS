@@ -1,0 +1,1168 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+  CONFLICT
+}
+
+enum ApprovalStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AttendanceStatus {
+  CHECKED_IN
+  CHECKED_OUT
+  LATE
+  CORRECTION_REQUESTED
+  CORRECTED
+}
+
+enum ChangeOperation {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum ConflictSensitivity {
+  NORMAL
+  SENSITIVE
+}
+
+enum ConflictStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
+enum Gender {
+  FEMALE
+  MALE
+  OTHER
+}
+
+enum StudentStatus {
+  APPLICANT
+  ACTIVE
+  INACTIVE
+  GRADUATED
+}
+
+model School {
+  id        String   @id @default(uuid())
+  name      String
+  code      String   @unique
+  phone     String?
+  email     String?
+  address   String?
+  admissionNumberPrefix String? @default("ADM")
+  nextAdmissionSequence Int     @default(1)
+  currentAcademicYearId String?
+  currentTermId         String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users             User[]
+  roles             Role[]
+  students          Student[]
+  guardians         Guardian[]
+  classes           Class[]
+  academicYears     AcademicYear[]
+  teachers          Teacher[]
+  feeStructures     FeeStructure[]
+  inventoryItems    InventoryItem[]
+  devices           Device[]
+  syncRecords       SynchronizationRecord[]
+  syncConflicts     SynchronizationConflict[]
+}
+
+model SyncableFields {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  schoolId    String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school      School           @relation(fields: [schoolId], references: [id])
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@unique([schoolId, name])
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  description String?
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+model User {
+  id           String   @id @default(uuid())
+  schoolId     String
+  email        String   @unique
+  displayName  String
+  passwordHash String
+  isActive     Boolean  @default(true)
+  mustChangePassword Boolean @default(false)
+  failedLoginAttempts Int    @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  deactivatedAt       DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school School     @relation(fields: [schoolId], references: [id])
+  roles  UserRole[]
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User @relation(fields: [userId], references: [id])
+  role   Role @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+}
+
+model Student {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  admissionNo    String
+  firstName      String
+  middleName     String?
+  lastName       String
+  gender         Gender         @default(OTHER)
+  dateOfBirth    DateTime
+  admissionDate  DateTime       @default(now())
+  previousSchool String?
+  status         StudentStatus  @default(ACTIVE)
+  currentAcademicYearId String?
+  currentClassId String?
+  currentStreamId String?
+  emergencyContact String?
+  medicalNotes     String?
+  photoUrl         String?
+  supportingDocuments Json?
+  notes            String?
+
+  school            School                    @relation(fields: [schoolId], references: [id])
+  currentClass      Class?                    @relation(fields: [currentClassId], references: [id])
+  currentStream     Stream?                   @relation(fields: [currentStreamId], references: [id])
+  guardians         StudentGuardian[]
+  portalCredential  StudentPortalCredential?
+  promotions        StudentPromotion[]
+  marks             Mark[]
+  reportCards       ReportCard[]
+  invoices          StudentInvoice[]
+
+  @@unique([schoolId, admissionNo])
+}
+
+model Guardian {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  fullName       String
+  phone          String
+  email          String?
+  address        String?
+
+  school   School            @relation(fields: [schoolId], references: [id])
+  students StudentGuardian[]
+}
+
+model StudentGuardian {
+  studentId    String
+  guardianId   String
+  relationship String
+  isPrimary    Boolean @default(false)
+  student      Student  @relation(fields: [studentId], references: [id])
+  guardian     Guardian @relation(fields: [guardianId], references: [id])
+
+  @@id([studentId, guardianId])
+}
+
+model StudentPortalCredential {
+  id           String   @id @default(uuid())
+  studentId    String   @unique
+  username     String   @unique
+  passwordHash String
+  mustReset    Boolean  @default(true)
+  failedLoginAttempts Int      @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  isActive            Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  student      Student  @relation(fields: [studentId], references: [id])
+}
+
+model Class {
+  id        String   @id @default(uuid())
+  schoolId  String
+  name      String
+  level     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school   School    @relation(fields: [schoolId], references: [id])
+  streams  Stream[]
+  students Student[]
+  fees     FeeStructure[]
+
+  @@unique([schoolId, name])
+}
+
+model Stream {
+  id        String   @id @default(uuid())
+  schoolId  String
+  classId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  class    Class     @relation(fields: [classId], references: [id])
+  students Student[]
+
+  @@unique([classId, name])
+}
+
+model AcademicYear {
+  id        String   @id @default(uuid())
+  schoolId  String
+  name      String
+  startsAt  DateTime
+  endsAt    DateTime
+  isActive  Boolean  @default(false)
+  school    School   @relation(fields: [schoolId], references: [id])
+  terms     Term[]
+}
+
+model Term {
+  id             String   @id @default(uuid())
+  academicYearId String
+  name           String
+  startsAt       DateTime
+  endsAt         DateTime
+  isCurrent      Boolean  @default(false)
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  examinations   Examination[]
+  assessments    Assessment[]
+  invoices       StudentInvoice[]
+}
+
+model StudentPromotion {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(PENDING)
+  deletedAt      DateTime?
+  studentId      String
+  previousAcademicYearId String?
+  previousClassId        String?
+  newAcademicYearId      String?
+  newClassId             String
+  promotionDate          DateTime
+  promotedBy             String?
+  notes                  String?
+  fromClassId            String?
+  toClassId              String?
+  effectiveAt            DateTime?
+
+  student Student @relation(fields: [studentId], references: [id])
+}
+
+model Teacher {
+  id             String   @id @default(uuid())
+  schoolId       String
+  userId         String?
+  staffId        String   @unique
+  firstName      String
+  lastName       String
+  pinHash        String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  school      School              @relation(fields: [schoolId], references: [id])
+  attendances TeacherAttendance[]
+  subjects    Subject[]
+  subjectAssignments TeacherSubjectAssignment[]
+  timetableEntries TimetableEntry[]
+}
+
+model TeacherAttendance {
+  id                    String           @id @default(uuid())
+  schoolId              String
+  deviceId              String?
+  createdBy             String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  version               Int              @default(1)
+  syncStatus            SyncStatus       @default(SYNCED)
+  lastSyncedAt          DateTime?
+  approvalStatus        ApprovalStatus   @default(APPROVED)
+  deletedAt             DateTime?
+  teacherId             String
+  attendanceDate        DateTime
+  checkInAt             DateTime?
+  checkOutAt            DateTime?
+  status                AttendanceStatus
+  correctionRequestedBy String?
+  correctionReason      String?
+  requestedCheckInAt    DateTime?
+  requestedCheckOutAt   DateTime?
+  approvedBy            String?
+  approvedAt            DateTime?
+
+  teacher Teacher @relation(fields: [teacherId], references: [id])
+
+  @@unique([teacherId, attendanceDate], name: "teacherId_attendanceDate")
+}
+
+model Subject {
+  id        String   @id @default(uuid())
+  schoolId  String
+  teacherId String?
+  code      String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teacher     Teacher?     @relation(fields: [teacherId], references: [id])
+  assessments Assessment[]
+  marks       Mark[]
+
+  @@unique([schoolId, code])
+}
+
+model Examination {
+  id        String   @id @default(uuid())
+  schoolId  String
+  termId    String
+  academicYearId String?
+  name      String
+  examinationType String @default("Test")
+  status    String   @default("DRAFT")
+  description String?
+  startsAt  DateTime
+  endsAt    DateTime
+  approvedBy String?
+  approvedAt DateTime?
+  publishedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  term      Term         @relation(fields: [termId], references: [id])
+  assessments Assessment[]
+
+  @@index([schoolId, termId, status])
+}
+
+model Assessment {
+  id            String   @id @default(uuid())
+  schoolId      String
+  termId        String
+  examinationId String?
+  subjectId     String
+  classId       String?
+  streamId      String?
+  teacherId     String?
+  name          String
+  maxScore      Decimal  @db.Decimal(6, 2)
+  weight        Decimal  @default(100) @db.Decimal(6, 2)
+  passMark      Decimal? @db.Decimal(6, 2)
+  status        String   @default("DRAFT")
+  submittedBy   String?
+  submittedAt   DateTime?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  reviewComment String?
+  publishedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  term          Term     @relation(fields: [termId], references: [id])
+  examination   Examination? @relation(fields: [examinationId], references: [id])
+  subject       Subject @relation(fields: [subjectId], references: [id])
+  marks         Mark[]
+
+  @@index([schoolId, examinationId, classId, subjectId])
+}
+
+model Mark {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  studentId      String
+  assessmentId   String
+  subjectId      String
+  score          Decimal        @db.Decimal(6, 2)
+  weightedScore  Decimal?       @db.Decimal(8, 2)
+  grade          String?
+  status         String         @default("DRAFT")
+  teacherComment String?
+  submittedBy    String?
+  submittedAt    DateTime?
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  reviewComment  String?
+  publishedAt    DateTime?
+
+  student    Student    @relation(fields: [studentId], references: [id])
+  assessment Assessment @relation(fields: [assessmentId], references: [id])
+  subject    Subject    @relation(fields: [subjectId], references: [id])
+
+  @@unique([studentId, assessmentId])
+  @@index([schoolId, assessmentId, status])
+}
+
+model GradeBoundary {
+  id        String  @id @default(uuid())
+  schoolId  String
+  grade     String
+  minScore  Decimal @db.Decimal(6, 2)
+  maxScore  Decimal @db.Decimal(6, 2)
+  remark    String?
+  points    Decimal? @db.Decimal(4, 2)
+  isPass    Boolean @default(true)
+}
+
+model ReportCard {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(PENDING)
+  deletedAt      DateTime?
+  studentId      String
+  termId         String
+  totalScore     Decimal        @db.Decimal(8, 2)
+  averageScore   Decimal        @db.Decimal(6, 2)
+  grade          String
+  remarks        String?
+  examinationId  String?
+  classId        String?
+  streamId       String?
+  status         String         @default("DRAFT")
+  subjectResults Json?
+  classTeacherComment String?
+  headTeacherComment String?
+  promotionStatus String?
+  nextTermOpeningDate DateTime?
+  publishedAt    DateTime?
+  generatedAt    DateTime       @default(now())
+
+  student Student @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, termId, examinationId])
+  @@index([schoolId, termId, status])
+}
+
+model TeacherSubjectAssignment {
+  id        String   @id @default(uuid())
+  schoolId  String
+  teacherId String
+  subjectId String
+  classId   String
+  streamId  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teacher Teacher @relation(fields: [teacherId], references: [id])
+
+  @@unique([teacherId, subjectId, classId, streamId])
+  @@index([schoolId, classId, subjectId])
+}
+
+model TimetableEntry {
+  id             String         @id @default(uuid())
+  schoolId       String
+  academicYearId String
+  termId         String
+  classId        String
+  streamId       String?
+  subjectId      String
+  teacherId      String
+  room           String?
+  dayOfWeek      Int
+  periodNumber   Int
+  startsAt       String
+  endsAt         String
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+
+  teacher Teacher @relation(fields: [teacherId], references: [id])
+
+  @@index([schoolId, termId, classId, streamId])
+  @@index([schoolId, teacherId, dayOfWeek])
+}
+
+model FeeStructure {
+  id        String  @id @default(uuid())
+  schoolId  String
+  academicYearId String?
+  termId    String?
+  classId   String
+  category  String  @default("Tuition")
+  name      String
+  description String?
+  amount    Decimal @db.Decimal(12, 2)
+  isMandatory Boolean @default(true)
+  dueDate   DateTime?
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  school    School  @relation(fields: [schoolId], references: [id])
+  class     Class   @relation(fields: [classId], references: [id])
+  invoices  StudentInvoice[]
+
+  @@unique([schoolId, academicYearId, termId, classId, category, name])
+}
+
+model StudentInvoice {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  studentId      String
+  termId         String
+  feeStructureId String
+  invoiceNo      String
+  invoiceDate    DateTime       @default(now())
+  status         String         @default("ISSUED")
+  amount         Decimal        @db.Decimal(12, 2)
+  amountPaid     Decimal        @default(0) @db.Decimal(12, 2)
+  adjustmentTotal Decimal       @default(0) @db.Decimal(12, 2)
+  balance        Decimal        @db.Decimal(12, 2)
+  dueDate        DateTime
+
+  student      Student      @relation(fields: [studentId], references: [id])
+  term         Term         @relation(fields: [termId], references: [id])
+  feeStructure FeeStructure @relation(fields: [feeStructureId], references: [id])
+  payments     Payment[]
+  lines        StudentInvoiceLine[]
+  adjustments  FeeAdjustment[]
+
+  @@unique([schoolId, invoiceNo])
+}
+
+model StudentInvoiceLine {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  description String
+  category    String
+  amount      Decimal  @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
+
+  invoice StudentInvoice @relation(fields: [invoiceId], references: [id])
+}
+
+model Payment {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  invoiceId      String
+  receiptNo      String
+  amount         Decimal        @db.Decimal(12, 2)
+  method         String
+  reference      String?
+  notes          String?
+  receivedBy     String?
+  paidAt         DateTime
+
+  invoice   StudentInvoice   @relation(fields: [invoiceId], references: [id])
+  receipt   Receipt?
+  reversals PaymentReversal[]
+
+  @@unique([schoolId, receiptNo])
+  @@unique([schoolId, reference])
+}
+
+model Receipt {
+  id          String   @id @default(uuid())
+  schoolId    String
+  paymentId   String   @unique
+  receiptNo   String
+  displayNo   String
+  amountWords String?
+  printedAt   DateTime?
+  reprintCount Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@unique([schoolId, receiptNo])
+}
+
+model PaymentReversal {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(PENDING)
+  deletedAt      DateTime?
+  paymentId      String
+  requestedBy    String?
+  reason         String
+  decisionReason String?
+  approvedBy     String?
+  approvedAt     DateTime?
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+}
+
+model Expense {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(PENDING)
+  deletedAt      DateTime?
+  expenseNo      String?
+  category       String
+  department     String?
+  description    String
+  amount         Decimal        @db.Decimal(12, 2)
+  method         String?
+  payee          String?
+  reference      String?
+  requestedBy    String?
+  supportingDocument String?
+  budgetId       String?
+  notes          String?
+  spentAt        DateTime
+
+  @@unique([schoolId, expenseNo])
+  @@unique([schoolId, reference])
+}
+
+model Budget {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  name           String
+  academicYearId String?
+  termId         String?
+  department     String        @default("School-wide")
+  category       String        @default("General")
+  amount         Decimal        @db.Decimal(12, 2)
+  committedAmount Decimal      @default(0) @db.Decimal(12, 2)
+  spentAmount    Decimal       @default(0) @db.Decimal(12, 2)
+  warningThreshold Int         @default(80)
+  hardCap         Boolean      @default(true)
+  period          String?
+  year           Int
+  requests       BudgetRequest[]
+}
+
+model BudgetRequest {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(PENDING)
+  deletedAt      DateTime?
+  budgetId       String
+  requestedBy    String
+  amount         Decimal        @db.Decimal(12, 2)
+  reason         String
+
+  budget Budget @relation(fields: [budgetId], references: [id])
+}
+
+model ApprovalWorkflow {
+  id              String         @id @default(uuid())
+  schoolId        String
+  entityType      String
+  entityId        String         @unique
+  requestedBy     String
+  currentApprover String?
+  status          String         @default("SUBMITTED")
+  approvalLevel   Int            @default(1)
+  decision        String?
+  decisionDate    DateTime?
+  comment         String?
+  nextApprover    String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model FeeAdjustment {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(PENDING)
+  deletedAt      DateTime?
+  studentId      String
+  invoiceId      String
+  adjustmentType String
+  amount         Decimal        @db.Decimal(12, 2)
+  percentage     Decimal?       @db.Decimal(6, 2)
+  reason         String
+  requestedBy    String?
+  approvedBy     String?
+  approvedAt     DateTime?
+  notes          String?
+
+  invoice StudentInvoice @relation(fields: [invoiceId], references: [id])
+}
+
+model FinancialSetting {
+  id                         String   @id @default(uuid())
+  schoolId                   String   @unique
+  maximumDepartmentBudget    Decimal  @default(50000000) @db.Decimal(12, 2)
+  maximumSingleExpense       Decimal  @default(2000000) @db.Decimal(12, 2)
+  maximumTransactionNoApproval Decimal @default(1000000) @db.Decimal(12, 2)
+  dailySpendingThreshold     Decimal  @default(5000000) @db.Decimal(12, 2)
+  feeWaiverApprovalThreshold Decimal  @default(500000) @db.Decimal(12, 2)
+  paymentReversalApprovalThreshold Decimal @default(250000) @db.Decimal(12, 2)
+  inventoryAdjustmentThreshold Decimal @default(1000000) @db.Decimal(12, 2)
+  budgetUtilizationWarningPercentage Int @default(80)
+  workingHoursStart          String   @default("07:00")
+  workingHoursEnd            String   @default("18:00")
+  segregationOfDuties        Boolean  @default(true)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model RiskAlert {
+  id             String   @id @default(uuid())
+  schoolId       String
+  category       String
+  severity       String
+  entityType     String
+  entityId       String
+  amount         Decimal? @db.Decimal(12, 2)
+  userId         String?
+  reason         String
+  status         String   @default("NEW")
+  notes          String?
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([schoolId, status])
+  @@index([schoolId, severity])
+}
+
+model InventoryItem {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  sku            String
+  name           String
+  category       String         @default("General")
+  description    String?
+  unit           String         @default("unit")
+  quantity       Int            @default(0)
+  reorderLevel   Int            @default(0)
+  unitCost       Decimal        @default(0) @db.Decimal(12, 2)
+  storageLocation String?
+  isActive       Boolean        @default(true)
+
+  school         School          @relation(fields: [schoolId], references: [id])
+  stockMovements StockMovement[]
+
+  @@unique([schoolId, sku])
+}
+
+model StockMovement {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  inventoryItemId String
+  movementType   String
+  quantity       Int
+  unitCost       Decimal?       @db.Decimal(12, 2)
+  supplierId     String?
+  departmentOrPerson String?
+  reference      String?
+  occurredAt     DateTime       @default(now())
+  approvedBy     String?
+  approvedAt     DateTime?
+  reason         String
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([schoolId, inventoryItemId, occurredAt])
+}
+
+model InventorySupplier {
+  id        String   @id @default(uuid())
+  schoolId  String
+  name      String
+  phone     String?
+  email     String?
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([schoolId, name])
+}
+
+model PayrollRecord {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(PENDING)
+  deletedAt      DateTime?
+  teacherId      String
+  payrollRunId   String?
+  payrollProfileId String?
+  period         String
+  grossPay       Decimal        @db.Decimal(12, 2)
+  deductions     Decimal        @db.Decimal(12, 2)
+  netPay         Decimal        @db.Decimal(12, 2)
+  paymentMethod  String?
+  paymentAccount String?
+  status         String         @default("DRAFT")
+  processedAt    DateTime?
+
+  @@index([schoolId, period, status])
+}
+
+model PayrollProfile {
+  id               String   @id @default(uuid())
+  schoolId         String
+  teacherId        String
+  employeeNo       String
+  employmentStatus String   @default("ACTIVE")
+  department       String?
+  baseSalary       Decimal  @db.Decimal(12, 2)
+  paymentMethod    String?
+  paymentAccount   String?
+  effectiveAt      DateTime
+  isActive         Boolean  @default(true)
+  createdBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  components PayrollComponent[]
+
+  @@unique([schoolId, employeeNo])
+  @@unique([schoolId, teacherId])
+}
+
+model PayrollComponent {
+  id               String   @id @default(uuid())
+  schoolId         String
+  payrollProfileId String
+  componentType    String
+  name             String
+  amount           Decimal  @db.Decimal(12, 2)
+  effectiveAt      DateTime
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  profile PayrollProfile @relation(fields: [payrollProfileId], references: [id])
+
+  @@index([schoolId, payrollProfileId, componentType])
+}
+
+model PayrollRun {
+  id             String   @id @default(uuid())
+  schoolId       String
+  period         String
+  status         String   @default("DRAFT")
+  grossTotal     Decimal  @default(0) @db.Decimal(12, 2)
+  deductionTotal Decimal  @default(0) @db.Decimal(12, 2)
+  netTotal       Decimal  @default(0) @db.Decimal(12, 2)
+  createdBy      String?
+  submittedBy    String?
+  submittedAt    DateTime?
+  approvedBy     String?
+  approvedAt     DateTime?
+  processedAt    DateTime?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@unique([schoolId, period])
+  @@index([schoolId, status])
+}
+
+model Notification {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  recipientType  String
+  recipientId    String?
+  channel        String         @default("IN_APP")
+  category       String         @default("GENERAL")
+  templateId     String?
+  payload        Json?
+  status         String         @default("PENDING")
+  attemptCount   Int            @default(0)
+  lastError      String?
+  readAt         DateTime?
+  title          String
+  body           String
+  sentAt         DateTime?
+
+  @@index([schoolId, recipientType, recipientId, status])
+}
+
+model NotificationTemplate {
+  id        String   @id @default(uuid())
+  schoolId  String
+  name      String
+  channel   String
+  subject   String?
+  body      String
+  variables Json?
+  isActive  Boolean  @default(true)
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([schoolId, name, channel])
+}
+
+model Announcement {
+  id             String   @id @default(uuid())
+  schoolId       String
+  title          String
+  message        String
+  audience       String
+  classId        String?
+  streamId       String?
+  academicYearId String?
+  priority       String   @default("NORMAL")
+  publishAt      DateTime
+  expiresAt      DateTime?
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@index([schoolId, audience, publishAt])
+}
+
+model AuditLog {
+  id             String         @id @default(uuid())
+  schoolId       String
+  deviceId       String?
+  createdBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+  syncStatus     SyncStatus     @default(SYNCED)
+  lastSyncedAt   DateTime?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  deletedAt      DateTime?
+  actorId        String?
+  action         String
+  entityType     String
+  entityId       String
+  previousValue  Json?
+  newValue       Json?
+  metadata       Json?
+}
+
+model Device {
+  id           String   @id @default(uuid())
+  schoolId     String
+  name         String
+  fingerprint  String   @unique
+  lastSeenAt   DateTime?
+  isTrusted    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+}
+
+model SynchronizationRecord {
+  id          String          @id @default(uuid())
+  schoolId    String
+  deviceId    String
+  entityType  String
+  entityId    String
+  operation   ChangeOperation
+  payload     Json
+  baseVersion Int?
+  status      SyncStatus      @default(PENDING)
+  retryCount  Int             @default(0)
+  error       String?
+  createdAt   DateTime        @default(now())
+  processedAt DateTime?
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([deviceId, status])
+}
+
+model SynchronizationConflict {
+  id              String              @id @default(uuid())
+  schoolId        String
+  deviceId        String
+  entityType      String
+  entityId        String
+  localVersion    Int
+  serverVersion   Int
+  localPayload     Json
+  serverPayload    Json
+  sensitivity     ConflictSensitivity
+  reason          String
+  status          ConflictStatus      @default(OPEN)
+  administratorId String?
+  createdAt       DateTime            @default(now())
+  resolvedAt      DateTime?
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId, status])
+}

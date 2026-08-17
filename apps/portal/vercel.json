@@ -1,0 +1,10 @@
+{
+  "buildCommand": "cd ../.. && npm install && npm run build --workspace apps/portal",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

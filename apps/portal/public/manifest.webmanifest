@@ -1,0 +1,17 @@
+{
+  "name": "Satelite Secondary Student Portal",
+  "short_name": "Satelite",
+  "description": "Satelite Secondary Student and Parent Portal",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f7f2",
+  "theme_color": "#12372f",
+  "icons": [
+    {
+      "src": "/aethina-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

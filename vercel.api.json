@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build --workspace packages/shared-types && npm run build --workspace packages/validation && npm run prisma:generate --workspace apps/api && npm run build --workspace apps/api",
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ]
+}
