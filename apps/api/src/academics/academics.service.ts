@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { ApprovalStatus, CurrentUser, SyncStatus } from "@aethina/shared-types";
+import { ApprovalStatus, CurrentUser, PermissionKey, SyncStatus } from "@aethina/shared-types";
 import { assessmentSchema, examinationSchema, marksEntrySchema, reportCardCommentSchema, resultDecisionSchema } from "@aethina/validation";
 import { Prisma } from "@prisma/client";
 import { AuditService } from "../audit/audit.service.js";
@@ -40,9 +40,10 @@ export class AcademicsService {
     return exam;
   }
 
-  assessments(schoolId: string, query: Record<string, string | undefined>) {
+  async assessments(actor: CurrentUser, query: Record<string, string | undefined>) {
+    const visibility = await this.assessmentVisibility(actor);
     return this.prisma.assessment.findMany({
-      where: { schoolId, examinationId: query.examinationId, termId: query.termId, classId: query.classId, subjectId: query.subjectId, status: query.status },
+      where: { schoolId: actor.schoolId, examinationId: query.examinationId, termId: query.termId, classId: query.classId, subjectId: query.subjectId, status: query.status, AND: visibility },
       include: { subject: true, examination: true, marks: { include: { student: true } } },
       orderBy: { createdAt: "desc" },
       take: 200
@@ -70,14 +71,15 @@ export class AcademicsService {
     return assessment;
   }
 
-  async marksEntry(schoolId: string, assessmentId: string) {
+  async marksEntry(actor: CurrentUser, assessmentId: string) {
     const assessment = await this.prisma.assessment.findFirst({
-      where: { id: assessmentId, schoolId },
+      where: { id: assessmentId, schoolId: actor.schoolId },
       include: { subject: true, marks: true }
     });
     if (!assessment) throw new NotFoundException("Assessment not found.");
+    await this.assertTeacherCanEnterMarks(actor, assessment);
     const students = await this.prisma.student.findMany({
-      where: { schoolId, deletedAt: null, status: "ACTIVE", currentClassId: assessment.classId ?? undefined, currentStreamId: assessment.streamId ?? undefined },
+      where: { schoolId: actor.schoolId, deletedAt: null, status: "ACTIVE", currentClassId: assessment.classId ?? undefined, currentStreamId: assessment.streamId ?? undefined },
       orderBy: [{ admissionNo: "asc" }]
     });
     const markByStudent = new Map(assessment.marks.map((mark) => [mark.studentId, mark]));
@@ -91,6 +93,7 @@ export class AcademicsService {
     const input = marksEntrySchema.parse(body);
     const assessment = await this.prisma.assessment.findFirst({ where: { id: input.assessmentId, schoolId: actor.schoolId } });
     if (!assessment) throw new NotFoundException("Assessment not found.");
+    await this.assertTeacherCanEnterMarks(actor, assessment);
     const maxScore = money(assessment.maxScore);
     const now = new Date();
     const status = input.status === "SUBMITTED" ? "SUBMITTED" : "DRAFT";
@@ -177,9 +180,10 @@ export class AcademicsService {
     return result;
   }
 
-  reportCards(schoolId: string, query: Record<string, string | undefined>) {
+  async reportCards(actor: CurrentUser, query: Record<string, string | undefined>) {
+    const visibility = await this.reportCardVisibility(actor);
     return this.prisma.reportCard.findMany({
-      where: { schoolId, termId: query.termId, examinationId: query.examinationId, studentId: query.studentId, status: query.status, deletedAt: null },
+      where: { schoolId: actor.schoolId, termId: query.termId, examinationId: query.examinationId, studentId: query.studentId, status: query.status, deletedAt: null, AND: visibility },
       include: { student: { include: { currentClass: true, currentStream: true } } },
       orderBy: [{ generatedAt: "desc" }],
       take: 200
@@ -190,8 +194,14 @@ export class AcademicsService {
     const school = await this.prisma.school.findUnique({ where: { id: actor.schoolId } });
     const termId = body.termId ?? school?.currentTermId;
     if (!termId) throw new BadRequestException("A term is required.");
+    const classTeacherScopes = await this.classTeacherScopes(actor);
     const marks = await this.prisma.mark.findMany({
-      where: { schoolId: actor.schoolId, status: { in: ["APPROVED", "PUBLISHED", "SUBMITTED"] }, assessment: { termId, examinationId: body.examinationId } },
+      where: {
+        schoolId: actor.schoolId,
+        status: { in: ["APPROVED", "PUBLISHED", "SUBMITTED"] },
+        assessment: { termId, examinationId: body.examinationId },
+        ...(classTeacherScopes.length ? { student: { OR: classTeacherScopes } } : {})
+      },
       include: { student: true, subject: true, assessment: true }
     });
     const byStudent = new Map<string, typeof marks>();
@@ -204,6 +214,10 @@ export class AcademicsService {
       const existingCard = await this.prisma.reportCard.findFirst({
         where: { studentId, termId, examinationId: body.examinationId ?? null }
       });
+      if (existingCard?.status === "PUBLISHED") {
+        cards.push(existingCard);
+        continue;
+      }
       const cardData = {
           totalScore: total,
           averageScore: average,
@@ -212,7 +226,10 @@ export class AcademicsService {
           subjectResults: rows.map((row) => ({ subject: row.subject.name, score: money(row.score), weightedScore: money(row.weightedScore), grade: row.grade, comment: row.teacherComment })) as Prisma.InputJsonValue,
           classId: rows[0].student.currentClassId,
           streamId: rows[0].student.currentStreamId,
-          status: "DRAFT"
+          status: "PREPARED",
+          preparedBy: actor.id,
+          preparedAt: new Date(),
+          approvalStatus: ApprovalStatus.Pending
       };
       cards.push(existingCard
         ? await this.prisma.reportCard.update({ where: { id: existingCard.id }, data: cardData })
@@ -229,7 +246,11 @@ export class AcademicsService {
           averageScore: average,
           grade: boundary?.grade ?? "N/A",
           remarks: boundary?.remark ?? null,
-          subjectResults: rows.map((row) => ({ subject: row.subject.name, score: money(row.score), weightedScore: money(row.weightedScore), grade: row.grade, comment: row.teacherComment })) as Prisma.InputJsonValue
+          subjectResults: rows.map((row) => ({ subject: row.subject.name, score: money(row.score), weightedScore: money(row.weightedScore), grade: row.grade, comment: row.teacherComment })) as Prisma.InputJsonValue,
+          status: "PREPARED",
+          preparedBy: actor.id,
+          preparedAt: new Date(),
+          approvalStatus: ApprovalStatus.Pending
         }
       }));
     }
@@ -239,9 +260,10 @@ export class AcademicsService {
 
   async updateReportCard(actor: CurrentUser, id: string, body: unknown) {
     const input = reportCardCommentSchema.parse(body);
+    await this.assertClassTeacherCanPrepareCard(actor, id);
     const card = await this.prisma.reportCard.update({
       where: { id },
-      data: { ...input, nextTermOpeningDate: input.nextTermOpeningDate ? new Date(input.nextTermOpeningDate) : null, version: { increment: 1 } }
+      data: { ...input, nextTermOpeningDate: input.nextTermOpeningDate ? new Date(input.nextTermOpeningDate) : null, status: "PREPARED", preparedBy: actor.id, preparedAt: new Date(), approvalStatus: ApprovalStatus.Pending, version: { increment: 1 } }
     });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "REPORT_CARD_COMMENTED", entityType: "REPORT_CARD", entityId: id });
     return card;
@@ -250,7 +272,11 @@ export class AcademicsService {
   async publishReportCard(actor: CurrentUser, id: string) {
     const card = await this.prisma.reportCard.findFirst({ where: { id, schoolId: actor.schoolId } });
     if (!card) throw new NotFoundException("Report card not found.");
-    const published = await this.prisma.reportCard.update({ where: { id }, data: { status: "PUBLISHED", publishedAt: new Date(), approvalStatus: ApprovalStatus.Approved, version: { increment: 1 } } });
+    if (!["PREPARED", "APPROVED"].includes(card.status)) {
+      throw new BadRequestException("Class teacher must prepare the report card before DOS publishing.");
+    }
+    const now = new Date();
+    const published = await this.prisma.reportCard.update({ where: { id }, data: { status: "PUBLISHED", publishedAt: now, finalApprovedBy: actor.id, finalApprovedAt: now, approvalStatus: ApprovalStatus.Approved, version: { increment: 1 } } });
     await this.prisma.notification.create({ data: { schoolId: actor.schoolId, recipientType: "STUDENT", recipientId: card.studentId, category: "ACADEMICS", channel: "IN_APP", title: "Report card published", body: "A new report card is available in the portal.", createdBy: actor.id } });
     return published;
   }
@@ -272,6 +298,74 @@ export class AcademicsService {
 
   private gradeFor(schoolId: string, score: number) {
     return this.prisma.gradeBoundary.findFirst({ where: { schoolId, minScore: { lte: score }, maxScore: { gte: score } }, orderBy: { minScore: "desc" } });
+  }
+
+  private async assessmentVisibility(actor: CurrentUser): Promise<Prisma.AssessmentWhereInput[]> {
+    const permissions = new Set(actor.permissions);
+    if (permissions.has(PermissionKey.AcademicsManage) || permissions.has(PermissionKey.MarksReview) || permissions.has(PermissionKey.ReportCardsPublish)) return [];
+    const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
+    if (!teacher) return [{ id: "__no_assessments_for_user__" }];
+    const assignments = await this.prisma.teacherSubjectAssignment.findMany({ where: { schoolId: actor.schoolId, teacherId: teacher.id, isActive: true } });
+    const ownership = assignments.map((assignment) => ({
+      subjectId: assignment.subjectId,
+      classId: assignment.classId,
+      ...(assignment.streamId ? { streamId: assignment.streamId } : {})
+    }));
+    return ownership.length ? [{ OR: ownership }] : [{ id: "__no_assessments_for_user__" }];
+  }
+
+  private async assertTeacherCanEnterMarks(actor: CurrentUser, assessment: { subjectId: string; classId: string | null; streamId: string | null; teacherId: string | null }) {
+    const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
+    if (!teacher) throw new BadRequestException("Only assigned teachers can enter marks.");
+    const assignment = await this.prisma.teacherSubjectAssignment.findFirst({
+      where: {
+        schoolId: actor.schoolId,
+        teacherId: teacher.id,
+        subjectId: assessment.subjectId,
+        classId: assessment.classId ?? undefined,
+        streamId: assessment.streamId ?? null,
+        isActive: true
+      }
+    });
+    if (!assignment && assessment.teacherId !== teacher.id) {
+      throw new BadRequestException("This assessment is outside the teacher's subject allocation.");
+    }
+  }
+
+  private async assertClassTeacherCanPrepareCard(actor: CurrentUser, reportCardId: string) {
+    if (actor.permissions.includes(PermissionKey.ReportCardsPublish)) return;
+    const card = await this.prisma.reportCard.findFirst({ where: { id: reportCardId, schoolId: actor.schoolId } });
+    if (!card) throw new NotFoundException("Report card not found.");
+    const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
+    if (!teacher || !card.classId) throw new BadRequestException("Only the assigned class teacher can prepare this report card.");
+    const assignment = await this.prisma.classTeacherAssignment.findFirst({
+      where: {
+        schoolId: actor.schoolId,
+        teacherId: teacher.id,
+        classId: card.classId,
+        streamId: card.streamId ?? null,
+        isActive: true
+      }
+    });
+    if (!assignment) throw new BadRequestException("Only the assigned class teacher can prepare this report card.");
+  }
+
+  private async reportCardVisibility(actor: CurrentUser): Promise<Prisma.ReportCardWhereInput[]> {
+    const permissions = new Set(actor.permissions);
+    if (permissions.has(PermissionKey.ReportCardsPublish) || permissions.has(PermissionKey.AcademicsManage) || permissions.has(PermissionKey.MarksReview)) return [];
+    const scopes = await this.classTeacherScopes(actor);
+    return scopes.length ? [{ OR: scopes.map((scope) => ({ classId: scope.currentClassId, streamId: scope.currentStreamId })) }] : [{ id: "__no_report_cards_for_user__" }];
+  }
+
+  private async classTeacherScopes(actor: CurrentUser): Promise<Array<{ currentClassId: string; currentStreamId?: string }>> {
+    if (actor.permissions.includes(PermissionKey.ReportCardsPublish)) return [];
+    const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
+    if (!teacher) return [];
+    const assignments = await this.prisma.classTeacherAssignment.findMany({ where: { schoolId: actor.schoolId, teacherId: teacher.id, isActive: true } });
+    return assignments.map((assignment) => ({
+      currentClassId: assignment.classId,
+      ...(assignment.streamId ? { currentStreamId: assignment.streamId } : {})
+    }));
   }
 }
 

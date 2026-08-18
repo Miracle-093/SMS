@@ -49,7 +49,7 @@ The backend is a NestJS API using Prisma ORM with PostgreSQL. It includes:
 
 - Authentication for staff users.
 - Student portal authentication.
-- Role and permission model.
+- Role and permission model with separated Administrator, Dean of Studies, Class Teacher, Teacher, and Bursar responsibilities.
 - School setup endpoints.
 - Student management endpoints.
 - Finance endpoints.
@@ -182,6 +182,7 @@ The system has been seeded with fictional Satelite Secondary School data for a U
 
 - One school: Satelite Secondary School.
 - One administrator.
+- One Dean of Studies.
 - One bursar.
 - Six teachers.
 - Thirty students.
@@ -201,8 +202,10 @@ The system has been seeded with fictional Satelite Secondary School data for a U
 ## Demo Accounts
 
 - Admin: `admin@aethina.test` / `AdminPass123`
+- Dean of Studies: `dos@satelitesecondary.test` / `DosPass123`
 - Bursar: `bursar@aethina.test` / `BursarPass123`
-- Teacher: `grace.otieno@aethina.test` / `TeacherPass123`
+- Class Teacher: `grace.otieno@aethina.test` / `TeacherPass123`
+- Teacher: `samuel.kiprotich@aethina.test` / `TeacherPass123`
 - Student portal: `sat-s1-001` / `StudentPass123`
 - Teacher kiosk: `TCH-001` / `1234`
 
@@ -213,7 +216,11 @@ The UI has been improved across the admin shell and student portal:
 - Dedicated online Admin / Teacher / Bursar app deployed.
 - Student Portal kept separate for students and parents.
 - Admin app navigation now filters visible sections by the logged-in user's permissions.
-- Role context cards now distinguish the School Administrator Console, Bursar & Accounts Workspace, and Teacher Workspace.
+- Role context cards now distinguish the School Administrator Console, Dean of Studies workspace, Class Teacher workspace, Bursar & Accounts Workspace, and Teacher Workspace.
+- DOS-only permissions now cover admissions, academic setup, subject allocation, class-teacher allocation, timetable management, and final report-card publishing.
+- Teachers are scoped to assigned classes/subjects for student visibility, timetable visibility, and marks entry.
+- Class teachers can prepare assigned report cards; DOS approval is required before publishing to the portal.
+- The bursar dashboard is finance-only and hides academic, attendance, risk, inventory, and report-card widgets.
 - Mobile navigation added for the admin app.
 - Responsive layouts improved for phone and desktop screens.
 - Tables made scroll-safe on small screens.

@@ -80,6 +80,7 @@ model School {
   classes           Class[]
   academicYears     AcademicYear[]
   teachers          Teacher[]
+  classTeacherAssignments ClassTeacherAssignment[]
   feeStructures     FeeStructure[]
   inventoryItems    InventoryItem[]
   devices           Device[]
@@ -262,6 +263,7 @@ model Class {
   streams  Stream[]
   students Student[]
   fees     FeeStructure[]
+  classTeacherAssignments ClassTeacherAssignment[]
 
   @@unique([schoolId, name])
 }
@@ -276,6 +278,7 @@ model Stream {
 
   class    Class     @relation(fields: [classId], references: [id])
   students Student[]
+  classTeacherAssignments ClassTeacherAssignment[]
 
   @@unique([classId, name])
 }
@@ -289,6 +292,7 @@ model AcademicYear {
   isActive  Boolean  @default(false)
   school    School   @relation(fields: [schoolId], references: [id])
   terms     Term[]
+  classTeacherAssignments ClassTeacherAssignment[]
 }
 
 model Term {
@@ -302,6 +306,7 @@ model Term {
   examinations   Examination[]
   assessments    Assessment[]
   invoices       StudentInvoice[]
+  classTeacherAssignments ClassTeacherAssignment[]
 }
 
 model StudentPromotion {
@@ -346,6 +351,7 @@ model Teacher {
   attendances TeacherAttendance[]
   subjects    Subject[]
   subjectAssignments TeacherSubjectAssignment[]
+  classTeacherAssignments ClassTeacherAssignment[]
   timetableEntries TimetableEntry[]
 }
 
@@ -519,6 +525,11 @@ model ReportCard {
   headTeacherComment String?
   promotionStatus String?
   nextTermOpeningDate DateTime?
+  preparedBy     String?
+  preparedAt     DateTime?
+  finalApprovedBy String?
+  finalApprovedAt DateTime?
+  rejectionReason String?
   publishedAt    DateTime?
   generatedAt    DateTime       @default(now())
 
@@ -543,6 +554,30 @@ model TeacherSubjectAssignment {
 
   @@unique([teacherId, subjectId, classId, streamId])
   @@index([schoolId, classId, subjectId])
+}
+
+model ClassTeacherAssignment {
+  id             String   @id @default(uuid())
+  schoolId       String
+  teacherId      String
+  classId        String
+  streamId       String?
+  academicYearId String
+  termId         String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  school       School       @relation(fields: [schoolId], references: [id])
+  teacher      Teacher      @relation(fields: [teacherId], references: [id])
+  class        Class        @relation(fields: [classId], references: [id])
+  stream       Stream?      @relation(fields: [streamId], references: [id])
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
+  term         Term?        @relation(fields: [termId], references: [id])
+
+  @@unique([teacherId, classId, streamId, academicYearId])
+  @@index([schoolId, classId, streamId])
+  @@index([schoolId, teacherId, isActive])
 }
 
 model TimetableEntry {

@@ -14,7 +14,7 @@ export class TimetableController {
   @Get()
   @RequirePermissions(PermissionKey.AcademicsRead)
   list(@CurrentUserParam() user: CurrentUser, @Query() query: Record<string, string | undefined>) {
-    return this.timetable.list(user.schoolId, query);
+    return this.timetable.list(user, query);
   }
 
   @Post()

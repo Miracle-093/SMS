@@ -71,6 +71,10 @@ async function main() {
       "auth.login",
       "users.manage",
       "school-config.manage",
+      "admissions.manage",
+      "academic-setup.manage",
+      "teacher-subjects.manage",
+      "class-teachers.manage",
       "students.read",
       "students.manage",
       "students.promote",
@@ -85,7 +89,10 @@ async function main() {
       "academics.read",
       "academics.manage",
       "marks.entry",
+      "marks.review",
       "results.approve",
+      "report-cards.prepare",
+      "report-cards.publish",
       "timetable.manage",
       "attendance.manage",
       "sync.review",
@@ -103,8 +110,10 @@ async function main() {
 
   const rolePermissionMap: Record<string, string[]> = {
     "Super Administrator": Array.from(permissionByKey.keys()),
-    "School Administrator": Array.from(permissionByKey.keys()),
-    "Head Teacher": ["auth.login", "dashboard.read", "school-config.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "audit.read", "attendance.manage", "approval.review", "academics.read", "academics.manage", "results.approve", "timetable.manage", "announcements.manage"],
+    "School Administrator": ["auth.login", "users.manage", "dashboard.read", "school-config.manage", "students.read", "audit.read", "approval.review", "risk.review", "finance.read", "budget.manage", "inventory.manage", "payroll.read", "announcements.manage", "sync.review"],
+    "Head Teacher": ["auth.login", "dashboard.read", "students.read", "audit.read", "attendance.manage", "approval.review", "academics.read", "marks.review", "announcements.manage"],
+    "Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],
+    "Class Teacher": ["auth.login", "students.read", "academics.read", "marks.review", "report-cards.prepare", "attendance.manage"],
     "Teacher": ["auth.login", "students.read", "attendance.manage", "academics.read", "marks.entry"],
     "Bursar/Accountant": ["auth.login", "dashboard.read", "students.read", "finance.read", "finance.manage", "budget.manage", "payroll.read", "payroll.manage"],
     "Receptionist": ["auth.login", "students.read", "students.manage", "portal-credentials.reset"],
@@ -116,6 +125,9 @@ async function main() {
       where: { schoolId_name: { schoolId: school.id, name: roleName } },
       update: {},
       create: { schoolId: school.id, name: roleName, description: `${roleName} role` }
+    });
+    await prisma.rolePermission.deleteMany({
+      where: { roleId: role.id, permission: { key: { notIn: permissionKeys } } }
     });
     await Promise.all(permissionKeys.map((key) => {
       const permission = permissionByKey.get(key);
@@ -134,16 +146,6 @@ async function main() {
     create: { schoolId: school.id, name: "School Administrator", description: "Full development administrator" }
   });
 
-  await Promise.all(
-    permissions.map((permission) =>
-      prisma.rolePermission.upsert({
-        where: { roleId_permissionId: { roleId: adminRole.id, permissionId: permission.id } },
-        update: {},
-        create: { roleId: adminRole.id, permissionId: permission.id }
-      })
-    )
-  );
-
   const admin = await prisma.user.upsert({
     where: { email: "admin@aethina.test" },
     update: { displayName: "Agnes Namatovu", passwordHash: hashSecret("AdminPass123"), mustChangePassword: false, isActive: true },
@@ -153,6 +155,28 @@ async function main() {
       displayName: "Agnes Namatovu",
       passwordHash: hashSecret("AdminPass123")
     }
+  });
+
+  const dosRole = await prisma.role.upsert({
+    where: { schoolId_name: { schoolId: school.id, name: "Dean of Studies" } },
+    update: {},
+    create: { schoolId: school.id, name: "Dean of Studies", description: "Academic operations and final report-card approval" }
+  });
+  const dos = await prisma.user.upsert({
+    where: { email: "dos@satelitesecondary.test" },
+    update: { displayName: "Michael Ssemakula", passwordHash: hashSecret("DosPass123"), mustChangePassword: false, isActive: true },
+    create: {
+      schoolId: school.id,
+      email: "dos@satelitesecondary.test",
+      displayName: "Michael Ssemakula",
+      passwordHash: hashSecret("DosPass123"),
+      mustChangePassword: false
+    }
+  });
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: dos.id, roleId: dosRole.id } },
+    update: {},
+    create: { userId: dos.id, roleId: dosRole.id }
   });
 
   await prisma.userRole.upsert({
@@ -187,6 +211,11 @@ async function main() {
     where: { schoolId_name: { schoolId: school.id, name: "Teacher" } },
     update: {},
     create: { schoolId: school.id, name: "Teacher", description: "Teaching staff" }
+  });
+  const classTeacherRole = await prisma.role.upsert({
+    where: { schoolId_name: { schoolId: school.id, name: "Class Teacher" } },
+    update: {},
+    create: { schoolId: school.id, name: "Class Teacher", description: "Class teacher report preparation role" }
   });
 
   const teacherUsers = await Promise.all([
@@ -229,6 +258,11 @@ async function main() {
       create: { userId: user.id, roleId: teacherRole.id }
     })
   ));
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: teacherUsers[0].id, roleId: classTeacherRole.id } },
+    update: {},
+    create: { userId: teacherUsers[0].id, roleId: classTeacherRole.id }
+  });
 
   const [teacherOne, teacherTwo, teacherThree, teacherFour, teacherFive, teacherSix] = await Promise.all([
     prisma.teacher.upsert({
@@ -313,7 +347,7 @@ async function main() {
       update: {},
       create: {
         schoolId: school.id,
-        createdBy: admin.id,
+        createdBy: dos.id,
         admissionNo: `SAT-S1-${String(index + 1).padStart(3, "0")}`,
         firstName,
         middleName: null,
@@ -406,8 +440,8 @@ async function main() {
     isActive: true
   });
 
-  const examination = await prisma.examination.create({ data: { schoolId: school.id, termId: term.id, name: "Term 1 Beginning Test", examinationType: "Beginning of Term", status: "PUBLISHED", startsAt: new Date("2026-02-16"), endsAt: new Date("2026-02-20"), publishedAt: new Date("2026-02-24") } });
-  const assessment = await prisma.assessment.create({ data: { schoolId: school.id, termId: term.id, examinationId: examination.id, subjectId: math.id, classId: standardOne.id, streamId: stream.id, teacherId: teacherOne.id, name: "S1 Mathematics Beginning Test", maxScore: 100, passMark: 50, status: "PUBLISHED", submittedBy: teacherUsers[0].id, submittedAt: new Date("2026-02-21"), reviewedBy: admin.id, reviewedAt: new Date("2026-02-23"), publishedAt: new Date("2026-02-24") } });
+  const examination = await prisma.examination.create({ data: { schoolId: school.id, termId: term.id, academicYearId: academicYear.id, name: "Term 1 Beginning Test", examinationType: "Beginning of Term", status: "PUBLISHED", startsAt: new Date("2026-02-16"), endsAt: new Date("2026-02-20"), approvedBy: dos.id, approvedAt: new Date("2026-02-23"), publishedAt: new Date("2026-02-24") } });
+  const assessment = await prisma.assessment.create({ data: { schoolId: school.id, termId: term.id, examinationId: examination.id, subjectId: math.id, classId: standardOne.id, streamId: stream.id, teacherId: teacherOne.id, name: "S1 Mathematics Beginning Test", maxScore: 100, passMark: 50, status: "PUBLISHED", submittedBy: teacherUsers[0].id, submittedAt: new Date("2026-02-21"), reviewedBy: dos.id, reviewedAt: new Date("2026-02-23"), publishedAt: new Date("2026-02-24") } });
 
   const hasUgandaGrades = await prisma.gradeBoundary.count({ where: { schoolId: school.id, grade: "D1" } });
   if (hasUgandaGrades === 0) {
@@ -431,7 +465,7 @@ async function main() {
     await prisma.mark.upsert({
       where: { studentId_assessmentId: { studentId: student.id, assessmentId: assessment.id } },
       update: { score, grade: ugandaGrade(score), status: "PUBLISHED", publishedAt: new Date("2026-02-24") },
-      create: { schoolId: school.id, studentId: student.id, assessmentId: assessment.id, subjectId: math.id, score, grade: ugandaGrade(score), status: "PUBLISHED", submittedBy: teacherUsers[0].id, submittedAt: new Date("2026-02-21"), reviewedBy: admin.id, reviewedAt: new Date("2026-02-23"), publishedAt: new Date("2026-02-24") }
+      create: { schoolId: school.id, studentId: student.id, assessmentId: assessment.id, subjectId: math.id, score, grade: ugandaGrade(score), status: "PUBLISHED", submittedBy: teacherUsers[0].id, submittedAt: new Date("2026-02-21"), reviewedBy: dos.id, reviewedAt: new Date("2026-02-23"), publishedAt: new Date("2026-02-24") }
     });
   }
 
@@ -665,6 +699,11 @@ async function main() {
     update: { isActive: true },
     create: { schoolId: school.id, teacherId: teacherOne.id, subjectId: math.id, classId: standardOne.id, streamId: stream.id }
   });
+  await prisma.classTeacherAssignment.upsert({
+    where: { teacherId_classId_streamId_academicYearId: { teacherId: teacherOne.id, classId: standardOne.id, streamId: stream.id, academicYearId: academicYear.id } },
+    update: { termId: term.id, isActive: true },
+    create: { schoolId: school.id, teacherId: teacherOne.id, classId: standardOne.id, streamId: stream.id, academicYearId: academicYear.id, termId: term.id }
+  });
   await prisma.teacherSubjectAssignment.upsert({
     where: { teacherId_subjectId_classId_streamId: { teacherId: teacherTwo.id, subjectId: english.id, classId: standardOne.id, streamId: stream.id } },
     update: { isActive: true },
@@ -711,7 +750,11 @@ async function main() {
         subjectResults: [{ subject: "Mathematics", score, grade: ugandaGrade(score) }],
         status: index < 8 ? "PUBLISHED" : "DRAFT",
         approvalStatus: index < 8 ? "APPROVED" : "PENDING",
-        publishedAt: index < 8 ? new Date("2026-02-24") : null
+        publishedAt: index < 8 ? new Date("2026-02-24") : null,
+        preparedBy: teacherUsers[0].id,
+        preparedAt: new Date("2026-02-22"),
+        finalApprovedBy: index < 8 ? dos.id : null,
+        finalApprovedAt: index < 8 ? new Date("2026-02-24") : null
       },
       create: {
           schoolId: school.id,
@@ -728,7 +771,11 @@ async function main() {
           subjectResults: [{ subject: "Mathematics", score, grade: ugandaGrade(score) }],
           status: index < 8 ? "PUBLISHED" : "DRAFT",
           approvalStatus: index < 8 ? "APPROVED" : "PENDING",
-          publishedAt: index < 8 ? new Date("2026-02-24") : null
+          publishedAt: index < 8 ? new Date("2026-02-24") : null,
+          preparedBy: teacherUsers[0].id,
+          preparedAt: new Date("2026-02-22"),
+          finalApprovedBy: index < 8 ? dos.id : null,
+          finalApprovedAt: index < 8 ? new Date("2026-02-24") : null
       }
     });
   }

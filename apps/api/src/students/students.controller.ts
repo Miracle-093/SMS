@@ -14,47 +14,47 @@ export class StudentsController {
   @Get()
   @RequirePermissions(PermissionKey.StudentsRead)
   list(@CurrentUserParam() user: CurrentUser, @Query() query: Record<string, string | undefined>) {
-    return this.students.list(user.schoolId, query);
+    return this.students.list(user, query);
   }
 
   @Get(":id")
   @RequirePermissions(PermissionKey.StudentsRead)
   profile(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {
-    return this.students.profile(user.schoolId, id);
+    return this.students.profile(user, id);
   }
 
   @Post()
-  @RequirePermissions(PermissionKey.StudentsManage)
+  @RequirePermissions(PermissionKey.AdmissionsManage)
   register(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
     return this.students.register(user, body);
   }
 
   @Put(":id")
-  @RequirePermissions(PermissionKey.StudentsManage)
+  @RequirePermissions(PermissionKey.AdmissionsManage)
   update(@CurrentUserParam() user: CurrentUser, @Param("id") id: string, @Body() body: unknown) {
     return this.students.update(user, id, body);
   }
 
   @Post(":id/activate")
-  @RequirePermissions(PermissionKey.StudentsManage)
+  @RequirePermissions(PermissionKey.AdmissionsManage)
   activate(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {
     return this.students.setActive(user, id, true);
   }
 
   @Post(":id/deactivate")
-  @RequirePermissions(PermissionKey.StudentsManage)
+  @RequirePermissions(PermissionKey.AdmissionsManage)
   deactivate(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {
     return this.students.setActive(user, id, false);
   }
 
   @Post(":id/reset-portal-credentials")
-  @RequirePermissions(PermissionKey.PortalCredentialsReset)
+  @RequirePermissions(PermissionKey.AdmissionsManage)
   resetPortal(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {
     return this.students.resetPortalCredentials(user, id);
   }
 
   @Post("promotions")
-  @RequirePermissions(PermissionKey.StudentsPromote)
+  @RequirePermissions(PermissionKey.AdmissionsManage)
   promote(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
     return this.students.promote(user, body);
   }

@@ -102,11 +102,13 @@ npm.cmd run build
 
 ## Demo Login
 
-- Admin/Teacher web app: `https://aethina-sms-admin.vercel.app`
+- Admin/DOS/Teacher/Bursar web app: `https://aethina-sms-admin.vercel.app`
 - Student/Parent portal: `https://aethina-sms-portal.vercel.app`
 - Admin: `admin@aethina.test` / `AdminPass123`
+- Dean of Studies: `dos@satelitesecondary.test` / `DosPass123`
 - Bursar: `bursar@aethina.test` / `BursarPass123`
-- Teacher: `grace.otieno@aethina.test` / `TeacherPass123`
+- Class Teacher: `grace.otieno@aethina.test` / `TeacherPass123`
+- Teacher: `samuel.kiprotich@aethina.test` / `TeacherPass123`
 - Portal: `sat-s1-001` / `StudentPass123`
 - Teacher kiosk: `TCH-001` / `1234`
 

@@ -2,15 +2,17 @@
 
 Live demo:
 
-- Admin/Teacher: `https://aethina-sms-admin.vercel.app`
+- Admin/DOS/Teacher/Bursar: `https://aethina-sms-admin.vercel.app`
 - Portal: `https://aethina-sms-portal.vercel.app`
 - API: `https://aethina-sms-api.vercel.app`
 
 ## Demo Accounts
 
 - Administrator: `admin@aethina.test` / `AdminPass123`
+- Dean of Studies: `dos@satelitesecondary.test` / `DosPass123`
 - Bursar: `bursar@aethina.test` / `BursarPass123`
-- Teacher: `grace.otieno@aethina.test` / `TeacherPass123`
+- Class Teacher: `grace.otieno@aethina.test` / `TeacherPass123`
+- Teacher: `samuel.kiprotich@aethina.test` / `TeacherPass123`
 - Student portal: `sat-s1-001` / `StudentPass123`
 - Teacher kiosk: staff ID `TCH-001`, PIN `1234`
 
@@ -18,14 +20,22 @@ Live demo:
 
 1. Open `https://aethina-sms-admin.vercel.app`.
 2. Sign in to the admin app.
-3. Open `Dashboard` to review students, teachers, fees, approvals, risk alerts, low stock, payroll, and sync status.
-4. Open `School Setup` to review Senior One/Senior Two classes, streams, subjects, terms, and Uganda grade boundaries.
-5. Open `Students` to view learners, guardians, admission numbers, and portal credentials.
-6. Use `Reset Portal` when a student or guardian needs a new temporary portal password.
-7. Open `Approvals` to approve or reject budget, expense, payroll, and payment-reversal requests.
-8. Open `Audit` to inspect sensitive administrative activity.
+3. Open `Dashboard` for school-wide oversight, finance visibility, governance approvals, risk, sync, and audit signals.
+4. Open `Students` to view learner records. Student edits are intentionally owned by the Dean of Studies.
+5. Open `Approvals` to approve or reject budget, expense, payroll, and payment-reversal requests.
+6. Open `Audit` to inspect sensitive administrative activity.
 
-Administrator access includes every Phase 1 section: Dashboard, Students, Academics, Timetable, Finance, Budgets, Inventory, Payroll, Notifications, Approvals, School Setup, Staff Attendance, Sync Review, Risk Alerts, and Audit.
+The administrator oversees the school and governance workflow but does not own day-to-day admissions, class setup, subject allocation, grading setup, timetable creation, or report-card publishing.
+
+## Dean Of Studies
+
+1. Sign in as the Dean of Studies.
+2. Open `School Setup` to manage academic years, terms, classes, streams, subjects, Uganda grade boundaries, subject allocations, and class-teacher assignments.
+3. Open `Students` to register learners, update student details, reset portal credentials, and manage promotions.
+4. Open `Timetable` and `Academics` to manage academic operations.
+5. Publish report cards only after the class teacher has prepared them.
+
+The DOS is the final academic authority for admissions, academic setup, student progression, and report-card publishing.
 
 ## Finance
 
@@ -34,19 +44,18 @@ Administrator access includes every Phase 1 section: Dashboard, Students, Academ
 3. Review fee structures, invoices, payments, receipts, expenses, and budgets.
 4. Record a payment against an invoice.
 5. Submit high-value expenses for approval.
-6. Check `Risk Alerts` for high-value transactions, waivers, reversals, and budget warnings.
+6. Message fee defaulters from finance workflows as communication features are expanded.
 
 The bursar workspace is intentionally finance-focused. It shows Dashboard, Students, Finance, Budgets, and Payroll, while hiding academic administration, school setup, inventory, sync review, and audit controls.
 
 ## Academics
 
-1. Sign in as an administrator or teacher.
-2. Open `Academics`.
-3. Review exams, assessments, marks, and report cards.
-4. Use Uganda grading boundaries: `D1`, `D2`, `C3`, `C4`, `C5`, `C6`, `P7`, `P8`, `F9`.
-5. Publish approved report cards so students and guardians can see them in the portal.
+1. Sign in as a teacher.
+2. Open `Students` to see only learners in classes or streams assigned to you.
+3. Open `Academics` to see assigned assessments and enter marks for assigned subjects only.
+4. Open `Timetable` to see your teaching timetable.
 
-The teacher workspace shows Students, Academics, Timetable, and Staff Attendance. Finance, payroll, budgets, inventory, school setup, risk, sync review, and audit are hidden for ordinary teachers.
+Class teachers get an additional report-card preparation workflow. They prepare report cards for assigned classes or streams, then the DOS gives final approval and publishes them to the portal.
 
 ## Teacher Attendance
 

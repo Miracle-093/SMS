@@ -46,7 +46,7 @@ type Persona = {
 const appSections: AppSection[] = [
   { id: "dashboard", label: "Dashboard", group: "Command", permissions: [PermissionKey.DashboardRead] },
   { id: "students", label: "Students", group: "Learners", permissions: [PermissionKey.StudentsRead] },
-  { id: "academics", label: "Academics", group: "Academics", permissions: [PermissionKey.AcademicsRead, PermissionKey.AcademicsManage, PermissionKey.MarksEntry] },
+  { id: "academics", label: "Academics", group: "Academics", permissions: [PermissionKey.AcademicsRead, PermissionKey.AcademicsManage, PermissionKey.MarksEntry, PermissionKey.MarksReview, PermissionKey.ReportCardsPrepare, PermissionKey.ReportCardsPublish] },
   { id: "timetable", label: "Timetable", group: "Academics", permissions: [PermissionKey.AcademicsRead, PermissionKey.TimetableManage] },
   { id: "finance", label: "Finance", group: "Finance", permissions: [PermissionKey.FinanceRead, PermissionKey.FinanceManage] },
   { id: "budgets", label: "Budgets", group: "Finance", permissions: [PermissionKey.BudgetManage] },
@@ -54,7 +54,7 @@ const appSections: AppSection[] = [
   { id: "payroll", label: "Payroll", group: "Finance", permissions: [PermissionKey.PayrollRead, PermissionKey.PayrollManage] },
   { id: "notifications", label: "Notifications", group: "Operations", permissions: [PermissionKey.NotificationsManage, PermissionKey.AnnouncementsManage] },
   { id: "approvals", label: "Approvals", group: "Governance", permissions: [PermissionKey.ApprovalReview] },
-  { id: "school", label: "School Setup", group: "Command", permissions: [PermissionKey.SchoolConfigManage] },
+  { id: "school", label: "School Setup", group: "Command", permissions: [PermissionKey.SchoolConfigManage, PermissionKey.AcademicSetupManage, PermissionKey.TeacherSubjectsManage, PermissionKey.ClassTeachersManage] },
   { id: "attendance", label: "Staff Attendance", group: "Operations", permissions: [PermissionKey.AttendanceManage] },
   { id: "sync", label: "Sync Review", group: "Governance", permissions: [PermissionKey.SyncReview] },
   { id: "risk", label: "Risk Alerts", group: "Governance", permissions: [PermissionKey.RiskReview] },
@@ -65,8 +65,11 @@ type SchoolConfig = {
   school: { id: string; name: string; code: string; phone?: string; email?: string; address?: string; admissionNumberPrefix?: string; currentAcademicYearId?: string; currentTermId?: string };
   academicYears: Array<{ id: string; name: string; startsAt?: string; endsAt?: string; isActive: boolean; terms: Array<{ id: string; name: string; startsAt?: string; endsAt?: string; isCurrent: boolean }> }>;
   classes: Array<{ id: string; name: string; level: number; streams: Array<{ id: string; name: string }> }>;
-  subjects: Array<{ id: string; code: string; name: string }>;
+  subjects: Array<{ id: string; code: string; name: string; teacherId?: string | null; teacher?: { firstName: string; lastName: string } | null }>;
   gradeBoundaries: Array<{ id: string; grade: string; minScore: string; maxScore: string; remark?: string }>;
+  teachers?: Array<{ id: string; staffId: string; firstName: string; lastName: string }>;
+  teacherSubjectAssignments?: Array<{ id: string; teacherId: string; subjectId: string; classId: string; streamId?: string | null; teacher?: { firstName: string; lastName: string } }>;
+  classTeacherAssignments?: Array<{ id: string; teacherId: string; classId: string; streamId?: string | null; teacher?: { firstName: string; lastName: string }; class?: { name: string }; stream?: { name: string } | null }>;
 };
 
 type Student = {
@@ -290,6 +293,9 @@ function App() {
   const [lastSync, setLastSync] = useState("Never");
   const visibleSections = useMemo(() => session ? sectionsForUser(session.user.permissions) : [], [session]);
   const persona = session ? personaFor(session.user.roles, session.user.permissions) : null;
+  const permissionSet = useMemo(() => new Set(session?.user.permissions ?? []), [session]);
+  const canManageStudents = permissionSet.has(PermissionKey.AdmissionsManage);
+  const financeOnly = Boolean(session && isFinanceOnly(session.user.roles, session.user.permissions));
 
   useEffect(() => {
     void refreshOfflineState();
@@ -570,14 +576,23 @@ function App() {
         <section className="config-band">
           <div><strong>Academic year</strong><span>{config?.academicYears.find((year) => year.id === config.school.currentAcademicYearId)?.name ?? "Not set"}</span></div>
           <div><strong>Current term</strong><span>{config?.academicYears.flatMap((year) => year.terms).find((term) => term.id === config.school.currentTermId)?.name ?? "Not set"}</span></div>
-          <div><strong>Classes</strong><span>{config?.classes.length ?? 0}</span></div>
-          <div><strong>Subjects</strong><span>{config?.subjects.length ?? 0}</span></div>
+          {financeOnly ? (
+            <>
+              <div><strong>Fee currency</strong><span>UGX</span></div>
+              <div><strong>Student accounts</strong><span>{visibleStudents.length}</span></div>
+            </>
+          ) : (
+            <>
+              <div><strong>Classes</strong><span>{config?.classes.length ?? 0}</span></div>
+              <div><strong>Subjects</strong><span>{config?.subjects.length ?? 0}</span></div>
+            </>
+          )}
         </section>
 
         {activeView === "dashboard" ? (
-          <DashboardView api={api} online={online} pendingCount={pendingCount} lastSync={lastSync} setMessage={setMessage} />
+          <DashboardView api={api} session={session} online={online} pendingCount={pendingCount} lastSync={lastSync} setMessage={setMessage} />
         ) : activeView === "academics" ? (
-          <AcademicsAdminView api={api} config={config} setMessage={setMessage} />
+          <AcademicsAdminView api={api} config={config} session={session} setMessage={setMessage} />
         ) : activeView === "timetable" ? (
           <TimetableAdminView api={api} config={config} setMessage={setMessage} />
         ) : activeView === "finance" ? (
@@ -640,20 +655,27 @@ function App() {
 
           <section className="detail-pane">
             {selected ? (
-              <StudentProfile student={selected} onReset={() => resetPortal(selected)} />
+              <StudentProfile student={selected} canResetPortal={canManageStudents} onReset={() => resetPortal(selected)} />
             ) : (
               <div className="empty-state"><h3>No student selected</h3><p>Select a student to view profile, guardian details, portal account and promotion history.</p></div>
             )}
           </section>
         </section>
 
-        <section className="form-band">
-          <div className="section-heading">
-            <h3>{selected ? "Edit Student" : "Register Student"}</h3>
-            {selected && <button className="ghost" onClick={() => { setSelected(null); setForm(emptyForm); }}>New registration</button>}
-          </div>
-          <StudentForm form={form} setForm={setForm} config={config} onSubmit={submitStudent} />
-        </section>
+        {canManageStudents ? (
+          <section className="form-band">
+            <div className="section-heading">
+              <h3>{selected ? "Edit Student" : "Register Student"}</h3>
+              {selected && <button className="ghost" onClick={() => { setSelected(null); setForm(emptyForm); }}>New registration</button>}
+            </div>
+            <StudentForm form={form} setForm={setForm} config={config} onSubmit={submitStudent} />
+          </section>
+        ) : (
+          <section className="form-band muted-panel">
+            <h3>Read-only student records</h3>
+            <p>{financeOnly ? "The bursar can view student fee accounts from Finance. Student details are maintained by the Dean of Studies." : "Student admissions, edits and promotions are maintained by the Dean of Studies."}</p>
+          </section>
+        )}
         </>}
       </section>
     </main>
@@ -695,7 +717,7 @@ function RoleHomeCard({ persona, sections, setActiveView }: { persona: Persona; 
   );
 }
 
-function StudentProfile({ student, onReset }: { student: Student; onReset: () => void }) {
+function StudentProfile({ student, canResetPortal, onReset }: { student: Student; canResetPortal: boolean; onReset: () => void }) {
   const guardian = student.guardians?.[0];
   return (
     <div className="profile">
@@ -711,7 +733,7 @@ function StudentProfile({ student, onReset }: { student: Student; onReset: () =>
         <dt>Medical</dt><dd>{student.medicalNotes ?? "None"}</dd>
         <dt>Portal</dt><dd>{student.portalCredential?.username ?? "Pending"}</dd>
       </dl>
-      <button onClick={onReset}>Reset Portal Credentials</button>
+      {canResetPortal && <button onClick={onReset}>Reset Portal Credentials</button>}
       <h4>Promotion History</h4>
       <ul className="history">
         {(student.promotions ?? []).map((promotion) => <li key={promotion.id}>{new Date(promotion.promotionDate).toLocaleDateString()} to class {promotion.newClassId}</li>)}
@@ -760,6 +782,8 @@ function SchoolConfigView({ config, api, refreshAll, setMessage }: { config: Sch
   const [classForm, setClassForm] = useState({ name: "", level: "1" });
   const [stream, setStream] = useState({ classId: "", name: "" });
   const [subject, setSubject] = useState({ code: "", name: "" });
+  const [subjectAssignment, setSubjectAssignment] = useState({ teacherId: "", subjectId: "", classId: "", streamId: "" });
+  const [classTeacherAssignment, setClassTeacherAssignment] = useState({ teacherId: "", classId: "", streamId: "", academicYearId: "", termId: "" });
   const [boundary, setBoundary] = useState({ grade: "", minScore: "0", maxScore: "100", remark: "" });
 
   useEffect(() => {
@@ -774,6 +798,21 @@ function SchoolConfigView({ config, api, refreshAll, setMessage }: { config: Sch
     });
     setTerm((current) => ({ ...current, academicYearId: current.academicYearId || config.school.currentAcademicYearId || config.academicYears[0]?.id || "" }));
     setStream((current) => ({ ...current, classId: current.classId || config.classes[0]?.id || "" }));
+    setSubjectAssignment((current) => ({
+      ...current,
+      teacherId: current.teacherId || config.teachers?.[0]?.id || "",
+      subjectId: current.subjectId || config.subjects[0]?.id || "",
+      classId: current.classId || config.classes[0]?.id || "",
+      streamId: current.streamId || config.classes[0]?.streams[0]?.id || ""
+    }));
+    setClassTeacherAssignment((current) => ({
+      ...current,
+      teacherId: current.teacherId || config.teachers?.[0]?.id || "",
+      classId: current.classId || config.classes[0]?.id || "",
+      streamId: current.streamId || config.classes[0]?.streams[0]?.id || "",
+      academicYearId: current.academicYearId || config.school.currentAcademicYearId || config.academicYears[0]?.id || "",
+      termId: current.termId || config.school.currentTermId || config.academicYears[0]?.terms[0]?.id || ""
+    }));
   }, [config]);
 
   async function submit(path: string, body: Record<string, unknown>, success: string) {
@@ -852,6 +891,29 @@ function SchoolConfigView({ config, api, refreshAll, setMessage }: { config: Sch
           <label>Name<input required value={subject.name} onChange={(event) => setSubject({ ...subject, name: event.target.value })} /></label>
         </div>
         <ConfigList items={config.subjects.map((item) => `${item.code} - ${item.name}`)} />
+      </form>
+
+      <form className="setup-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/teacher-subject-assignments", { ...subjectAssignment, streamId: subjectAssignment.streamId || null }, "Teacher subject allocation saved."); }}>
+        <div className="section-heading"><h3>Subject Allocation</h3><button type="submit">Assign</button></div>
+        <div className="setup-form">
+          <label>Teacher<select value={subjectAssignment.teacherId} onChange={(event) => setSubjectAssignment({ ...subjectAssignment, teacherId: event.target.value })}>{config.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.firstName} {teacher.lastName}</option>)}</select></label>
+          <label>Subject<select value={subjectAssignment.subjectId} onChange={(event) => setSubjectAssignment({ ...subjectAssignment, subjectId: event.target.value })}>{config.subjects.map((item) => <option key={item.id} value={item.id}>{item.code} - {item.name}</option>)}</select></label>
+          <label>Class<select value={subjectAssignment.classId} onChange={(event) => setSubjectAssignment({ ...subjectAssignment, classId: event.target.value, streamId: config.classes.find((item) => item.id === event.target.value)?.streams[0]?.id || "" })}>{config.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label>Stream<select value={subjectAssignment.streamId} onChange={(event) => setSubjectAssignment({ ...subjectAssignment, streamId: event.target.value })}><option value="">Whole class</option>{config.classes.find((item) => item.id === subjectAssignment.classId)?.streams.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        </div>
+        <ConfigList items={(config.teacherSubjectAssignments ?? []).map((item) => `${item.teacher?.firstName ?? "Teacher"} ${item.teacher?.lastName ?? ""}: ${config.subjects.find((subject) => subject.id === item.subjectId)?.name ?? item.subjectId}`)} />
+      </form>
+
+      <form className="setup-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/class-teacher-assignments", { ...classTeacherAssignment, streamId: classTeacherAssignment.streamId || null, termId: classTeacherAssignment.termId || null }, "Class teacher allocation saved."); }}>
+        <div className="section-heading"><h3>Class Teachers</h3><button type="submit">Assign</button></div>
+        <div className="setup-form">
+          <label>Teacher<select value={classTeacherAssignment.teacherId} onChange={(event) => setClassTeacherAssignment({ ...classTeacherAssignment, teacherId: event.target.value })}>{config.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.firstName} {teacher.lastName}</option>)}</select></label>
+          <label>Class<select value={classTeacherAssignment.classId} onChange={(event) => setClassTeacherAssignment({ ...classTeacherAssignment, classId: event.target.value, streamId: config.classes.find((item) => item.id === event.target.value)?.streams[0]?.id || "" })}>{config.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label>Stream<select value={classTeacherAssignment.streamId} onChange={(event) => setClassTeacherAssignment({ ...classTeacherAssignment, streamId: event.target.value })}><option value="">Whole class</option>{config.classes.find((item) => item.id === classTeacherAssignment.classId)?.streams.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label>Academic year<select value={classTeacherAssignment.academicYearId} onChange={(event) => setClassTeacherAssignment({ ...classTeacherAssignment, academicYearId: event.target.value })}>{config.academicYears.map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}</select></label>
+          <label>Term<select value={classTeacherAssignment.termId} onChange={(event) => setClassTeacherAssignment({ ...classTeacherAssignment, termId: event.target.value })}><option value="">All terms</option>{config.academicYears.flatMap((year) => year.terms).map((termItem) => <option key={termItem.id} value={termItem.id}>{termItem.name}</option>)}</select></label>
+        </div>
+        <ConfigList items={(config.classTeacherAssignments ?? []).map((item) => `${item.teacher?.firstName ?? "Teacher"} ${item.teacher?.lastName ?? ""}: ${item.class?.name ?? item.classId}${item.stream ? ` ${item.stream.name}` : ""}`)} />
       </form>
 
       <form className="setup-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/grade-boundaries", { ...boundary, minScore: Number(boundary.minScore), maxScore: Number(boundary.maxScore) }, "Grade boundary created."); }}>
@@ -1097,7 +1159,7 @@ function fromStudent(student: Student, config: SchoolConfig | null): Registratio
   };
 }
 
-function DashboardView({ api, online, pendingCount, lastSync, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; online: boolean; pendingCount: number; lastSync: string; setMessage: (message: string) => void }) {
+function DashboardView({ api, session, online, pendingCount, lastSync, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; session: Session; online: boolean; pendingCount: number; lastSync: string; setMessage: (message: string) => void }) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [alerts, setAlerts] = useState<Array<{ type: string; title: string; severity?: string; createdAt: string }>>([]);
   const [activity, setActivity] = useState<AuditRecord[]>([]);
@@ -1117,7 +1179,8 @@ function DashboardView({ api, online, pendingCount, lastSync, setMessage }: { ap
     void load().catch((error) => setMessage(error instanceof Error ? error.message : "Dashboard unavailable."));
   }, []);
 
-  const cards = [
+  const financeOnly = isFinanceOnly(session.user.roles, session.user.permissions);
+  const allCards = [
     ["Active students", summary?.activeStudents],
     ["Teachers", summary?.teachers],
     ["Expected fees", ugx(summary?.expectedFees)],
@@ -1136,6 +1199,18 @@ function DashboardView({ api, online, pendingCount, lastSync, setMessage }: { ap
     ["Failed notifications", summary?.failedNotifications],
     ["Portal logins today", summary?.portalLoginsToday]
   ];
+  const financeCards = [
+    ["Expected fees", ugx(summary?.expectedFees)],
+    ["Fees collected", ugx(summary?.collectedFees)],
+    ["Outstanding fees", ugx(summary?.outstandingFees)],
+    ["Collection rate", summary?.collectionPercentage === null || summary?.collectionPercentage === undefined ? "-" : `${summary.collectionPercentage}%`],
+    ["Discounts/Waivers", ugx(summary?.discountsWaivers)],
+    ["Expenses", ugx(summary?.expenses)],
+    ["Net cash movement", ugx(summary?.netCashMovement)],
+    ["Budget approvals", summary?.pendingBudgetApprovals],
+    ["Active payroll runs", summary?.activePayrollRuns]
+  ];
+  const cards = financeOnly ? financeCards : allCards;
 
   return (
     <section className="dashboard-grid">
@@ -1152,14 +1227,14 @@ function DashboardView({ api, online, pendingCount, lastSync, setMessage }: { ap
           <dt>As of</dt><dd>{summary ? new Date(summary.asOf).toLocaleString() : "-"}</dd>
         </dl>
       </section>
-      <section className="operation-panel">
+      {!financeOnly && <section className="operation-panel">
         <div className="section-heading"><h3>Action Alerts</h3><span className="pill">{alerts.length}</span></div>
         <table><tbody>
           {alerts.map((alert, index) => <tr key={`${alert.type}-${index}`}><td><span className="pill">{alert.type}</span></td><td>{alert.title}</td><td>{alert.severity ?? ""}</td></tr>)}
           {alerts.length === 0 && <tr><td className="empty">No active alerts.</td></tr>}
         </tbody></table>
-      </section>
-      <section className="operation-panel wide-panel">
+      </section>}
+      {!financeOnly && <section className="operation-panel wide-panel">
         <div className="section-heading"><h3>Recent Activity</h3></div>
         <table>
           <thead><tr><th>Time</th><th>Action</th><th>Entity</th></tr></thead>
@@ -1168,7 +1243,7 @@ function DashboardView({ api, online, pendingCount, lastSync, setMessage }: { ap
             {activity.length === 0 && <tr><td colSpan={3} className="empty">No recent activity yet.</td></tr>}
           </tbody>
         </table>
-      </section>
+      </section>}
     </section>
   );
 }
@@ -1415,19 +1490,48 @@ function RiskAlertsView({ api, setMessage }: { api: (path: string, init?: Reques
   return <section className="operation-panel"><div className="section-heading"><h3>Financial Risk Alert Center</h3><button type="button" onClick={() => void load()}>Refresh</button></div><table><thead><tr><th>Risk</th><th>Entity</th><th>Amount</th><th>Reason</th><th>Status</th><th>Review</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.category}<br /><span className="pill">{row.severity}</span></td><td>{row.entityType}<br /><small>{row.entityId}</small></td><td>{ugx(row.amount)}</td><td>{row.reason}</td><td>{row.status}</td><td className="row-actions"><button type="button" onClick={() => void review(row.id, "UNDER_REVIEW")}>Review</button><button className="ghost" type="button" onClick={() => void review(row.id, "RESOLVED")}>Resolve</button><button className="ghost" type="button" onClick={() => void review(row.id, "FALSE_POSITIVE")}>False Positive</button><button className="ghost" type="button" onClick={() => void review(row.id, "ESCALATED")}>Escalate</button></td></tr>)}{rows.length === 0 && <tr><td colSpan={6} className="empty">No financial risk alerts found.</td></tr>}</tbody></table></section>;
 }
 
-function AcademicsAdminView({ api, config, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; setMessage: (message: string) => void }) {
+function AcademicsAdminView({ api, config, session, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; session: Session; setMessage: (message: string) => void }) {
   const [exams, setExams] = useState<any[]>([]);
   const [assessments, setAssessments] = useState<any[]>([]);
   const [cards, setCards] = useState<any[]>([]);
+  const permissionSet = new Set(session.user.permissions);
+  const canPrepareReports = permissionSet.has(PermissionKey.ReportCardsPrepare);
+  const canPublishReports = permissionSet.has(PermissionKey.ReportCardsPublish);
+  const canManageAcademics = permissionSet.has(PermissionKey.AcademicsManage);
   async function load() {
     const [nextExams, nextAssessments, nextCards] = await Promise.all([api("/academics/examinations"), api("/academics/assessments"), api("/academics/report-cards")]);
     setExams(asArray<any>(nextExams));
     setAssessments(asArray<any>(nextAssessments));
     setCards(asArray<any>(nextCards));
   }
+  async function prepareReports() {
+    await api("/academics/report-cards/generate", { method: "POST", body: JSON.stringify({ termId: config?.school.currentTermId }) });
+    setMessage("Report cards prepared for the assigned class and sent to DOS review.");
+    await load();
+  }
+  async function publishReport(cardId: string) {
+    await api(`/academics/report-cards/${cardId}/publish`, { method: "POST", body: JSON.stringify({}) });
+    setMessage("Report card approved by DOS and published to the portal.");
+    await load();
+  }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Academics unavailable.")); }, []);
   const termName = config?.academicYears.flatMap((year) => year.terms).find((term) => term.id === config.school.currentTermId)?.name ?? "-";
-  return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Academic Management</h3><button type="button" onClick={() => void load()}>Refresh</button></div><div className="summary-strip"><span>Current term: {termName}</span><span>{assessments.filter((item) => item.status === "SUBMITTED").length} awaiting review</span><span>{cards.filter((item) => item.status === "PUBLISHED").length} published report cards</span></div><FinanceTable headings={["Exam", "Type", "Status", "Window"]} rows={exams.map((exam) => [exam.name, exam.examinationType ?? "-", exam.status ?? "-", `${dateOnly(exam.startsAt)} - ${dateOnly(exam.endsAt)}`])} /><FinanceTable headings={["Assessment", "Subject", "Status", "Marks"]} rows={assessments.map((item) => [item.name, item.subject?.name ?? "-", item.status ?? "-", item.marks?.length ?? 0])} /><FinanceTable headings={["Student", "Grade", "Average", "Status"]} rows={cards.slice(0, 20).map((card) => [`${card.student?.firstName ?? ""} ${card.student?.lastName ?? ""}`, card.grade, String(card.averageScore), card.status])} /></section>;
+  return <section className="operation-panel wide-panel">
+    <div className="section-heading">
+      <h3>{canManageAcademics ? "DOS Academic Management" : canPrepareReports ? "Class Teacher Reports" : "Teacher Academics"}</h3>
+      <div className="row-actions">
+        {canPrepareReports && <button type="button" onClick={() => void prepareReports()}>Prepare Reports</button>}
+        <button type="button" onClick={() => void load()}>Refresh</button>
+      </div>
+    </div>
+    <div className="summary-strip"><span>Current term: {termName}</span><span>{assessments.filter((item) => item.status === "SUBMITTED").length} awaiting review</span><span>{cards.filter((item) => item.status === "PUBLISHED").length} published report cards</span></div>
+    <FinanceTable headings={["Exam", "Type", "Status", "Window"]} rows={exams.map((exam) => [exam.name, exam.examinationType ?? "-", exam.status ?? "-", `${dateOnly(exam.startsAt)} - ${dateOnly(exam.endsAt)}`])} />
+    <FinanceTable headings={["Assessment", "Subject", "Status", "Marks"]} rows={assessments.map((item) => [item.name, item.subject?.name ?? "-", item.status ?? "-", item.marks?.length ?? 0])} />
+    <div className="table-scroll"><table><thead><tr><th>Student</th><th>Grade</th><th>Average</th><th>Status</th><th>DOS action</th></tr></thead><tbody>
+      {cards.slice(0, 20).map((card) => <tr key={card.id}><td>{card.student?.firstName ?? ""} {card.student?.lastName ?? ""}</td><td>{card.grade}</td><td>{String(card.averageScore)}</td><td><span className="pill">{card.status}</span></td><td>{canPublishReports && card.status === "PREPARED" ? <button type="button" onClick={() => void publishReport(card.id)}>Approve & Publish</button> : "-"}</td></tr>)}
+      {cards.length === 0 && <tr><td colSpan={5} className="empty">No report cards to display.</td></tr>}
+    </tbody></table></div>
+  </section>;
 }
 
 function TimetableAdminView({ api, config, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; setMessage: (message: string) => void }) {
@@ -1502,11 +1606,25 @@ function sectionsForUser(permissions: string[]) {
 function personaFor(roles: string[], permissions: string[]): Persona {
   const roleText = roles.join(" ").toLowerCase();
   const permissionSet = new Set(permissions);
+  if (roleText.includes("dean of studies") || permissionSet.has(PermissionKey.AcademicSetupManage)) {
+    return {
+      kicker: "Dean of Studies",
+      title: "Academic Control Room",
+      summary: "Admissions, class setup, subject allocation, timetables, grading, examinations, and final report-card approval."
+    };
+  }
+  if (roleText.includes("class teacher") || permissionSet.has(PermissionKey.ReportCardsPrepare)) {
+    return {
+      kicker: "Class teacher",
+      title: "Class Teacher Workspace",
+      summary: "Review marks for assigned learners, prepare report cards, and send academic records to the DOS for final publishing."
+    };
+  }
   if (roleText.includes("administrator")) {
     return {
       kicker: "Full command center",
       title: "School Administrator Console",
-      summary: "Complete oversight of learners, academics, finance, operations, approvals, risk, sync, and audit."
+      summary: "School-wide oversight, users, governance approvals, finance visibility, risk, sync, and audit."
     };
   }
   if (roleText.includes("head teacher")) {
@@ -1535,6 +1653,17 @@ function personaFor(roles: string[], permissions: string[]): Persona {
     title: "Satelite Secondary Workspace",
     summary: "Your available sections are based on the permissions assigned by the school administrator."
   };
+}
+
+function isFinanceOnly(roles: string[], permissions: string[]) {
+  const roleText = roles.join(" ").toLowerCase();
+  const permissionSet = new Set(permissions);
+  return (roleText.includes("bursar") || roleText.includes("accountant")) &&
+    permissionSet.has(PermissionKey.FinanceRead) &&
+    !permissionSet.has(PermissionKey.AcademicSetupManage) &&
+    !permissionSet.has(PermissionKey.MarksEntry) &&
+    !permissionSet.has(PermissionKey.ReportCardsPrepare) &&
+    !permissionSet.has(PermissionKey.ReportCardsPublish);
 }
 
 function viewTitle(view: ActiveView) {

@@ -24,37 +24,49 @@ export class SchoolConfigController {
   }
 
   @Post("academic-years")
-  @RequirePermissions(PermissionKey.SchoolConfigManage)
+  @RequirePermissions(PermissionKey.AcademicSetupManage)
   createAcademicYear(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
     return this.schoolConfig.createAcademicYear(user, body);
   }
 
   @Post("terms")
-  @RequirePermissions(PermissionKey.SchoolConfigManage)
+  @RequirePermissions(PermissionKey.AcademicSetupManage)
   createTerm(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
     return this.schoolConfig.createTerm(user, body);
   }
 
   @Post("classes")
-  @RequirePermissions(PermissionKey.SchoolConfigManage)
+  @RequirePermissions(PermissionKey.AcademicSetupManage)
   createClass(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
     return this.schoolConfig.createClass(user, body);
   }
 
   @Post("streams")
-  @RequirePermissions(PermissionKey.SchoolConfigManage)
+  @RequirePermissions(PermissionKey.AcademicSetupManage)
   createStream(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
     return this.schoolConfig.createStream(user, body);
   }
 
   @Post("subjects")
-  @RequirePermissions(PermissionKey.SchoolConfigManage)
+  @RequirePermissions(PermissionKey.AcademicSetupManage)
   createSubject(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
     return this.schoolConfig.createSubject(user, body);
   }
 
+  @Post("teacher-subject-assignments")
+  @RequirePermissions(PermissionKey.TeacherSubjectsManage)
+  createTeacherSubjectAssignment(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
+    return this.schoolConfig.createTeacherSubjectAssignment(user, body);
+  }
+
+  @Post("class-teacher-assignments")
+  @RequirePermissions(PermissionKey.ClassTeachersManage)
+  createClassTeacherAssignment(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
+    return this.schoolConfig.createClassTeacherAssignment(user, body);
+  }
+
   @Post("grade-boundaries")
-  @RequirePermissions(PermissionKey.SchoolConfigManage)
+  @RequirePermissions(PermissionKey.AcademicSetupManage)
   createGradeBoundary(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
     return this.schoolConfig.createGradeBoundary(user, body);
   }

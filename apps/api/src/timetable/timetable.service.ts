@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
 import { type CurrentUser } from "@aethina/shared-types";
+import { PermissionKey } from "@aethina/shared-types";
 import { timetableEntrySchema } from "@aethina/validation";
 import { AuditService } from "../audit/audit.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -11,9 +12,10 @@ export class TimetableService {
     @Inject(AuditService) private readonly audit: AuditService
   ) {}
 
-  list(schoolId: string, query: Record<string, string | undefined>) {
+  async list(actor: CurrentUser, query: Record<string, string | undefined>) {
+    const teacherScope = await this.teacherScope(actor);
     return this.prisma.timetableEntry.findMany({
-      where: { schoolId, deletedAt: null, academicYearId: query.academicYearId, termId: query.termId, classId: query.classId, streamId: query.streamId, teacherId: query.teacherId },
+      where: { schoolId: actor.schoolId, deletedAt: null, academicYearId: query.academicYearId, termId: query.termId, classId: query.classId, streamId: query.streamId, teacherId: teacherScope ?? query.teacherId },
       orderBy: [{ dayOfWeek: "asc" }, { periodNumber: "asc" }]
     });
   }
@@ -39,5 +41,12 @@ export class TimetableService {
     const entry = await this.prisma.timetableEntry.create({ data: { schoolId: actor.schoolId, createdBy: actor.id, ...input, streamId: input.streamId ?? null, room: input.room ?? null } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "TIMETABLE_ENTRY_CREATED", entityType: "TIMETABLE_ENTRY", entityId: entry.id, newValue: entry });
     return entry;
+  }
+
+  private async teacherScope(actor: CurrentUser) {
+    const permissions = new Set(actor.permissions);
+    if (permissions.has(PermissionKey.TimetableManage) || permissions.has(PermissionKey.AcademicSetupManage)) return null;
+    const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
+    return teacher?.id ?? "__no_timetable_for_user__";
   }
 }

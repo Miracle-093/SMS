@@ -16,10 +16,15 @@ export class SchoolConfigService {
       this.prisma.school.findUniqueOrThrow({ where: { id: schoolId } }),
       this.prisma.academicYear.findMany({ where: { schoolId }, include: { terms: true }, orderBy: { startsAt: "desc" } }),
       this.prisma.class.findMany({ where: { schoolId }, include: { streams: true }, orderBy: { level: "asc" } }),
-      this.prisma.subject.findMany({ where: { schoolId }, orderBy: { name: "asc" } }),
+      this.prisma.subject.findMany({ where: { schoolId }, include: { teacher: true }, orderBy: { name: "asc" } }),
       this.prisma.gradeBoundary.findMany({ where: { schoolId }, orderBy: { minScore: "desc" } })
     ]);
-    return { school, academicYears, classes, subjects, gradeBoundaries };
+    const [teachers, teacherSubjectAssignments, classTeacherAssignments] = await Promise.all([
+      this.prisma.teacher.findMany({ where: { schoolId }, orderBy: [{ lastName: "asc" }, { firstName: "asc" }] }),
+      this.prisma.teacherSubjectAssignment.findMany({ where: { schoolId, isActive: true }, include: { teacher: true }, orderBy: { createdAt: "desc" } }),
+      this.prisma.classTeacherAssignment.findMany({ where: { schoolId, isActive: true }, include: { teacher: true, class: true, stream: true, academicYear: true, term: true }, orderBy: { createdAt: "desc" } })
+    ]);
+    return { school, academicYears, classes, subjects, gradeBoundaries, teachers, teacherSubjectAssignments, classTeacherAssignments };
   }
 
   async updateProfile(actor: CurrentUser, body: unknown) {
@@ -105,10 +110,57 @@ export class SchoolConfigService {
     return record;
   }
 
+  async createTeacherSubjectAssignment(actor: CurrentUser, body: unknown) {
+    const input = body as { teacherId?: string; subjectId?: string; classId?: string; streamId?: string | null };
+    if (!input.teacherId || !input.subjectId || !input.classId) throw new BadRequestException("Teacher, subject and class are required.");
+    await this.validateAcademicOwnership(actor.schoolId, input.teacherId, input.subjectId, input.classId, input.streamId ?? null);
+    const existing = await this.prisma.teacherSubjectAssignment.findFirst({
+      where: { schoolId: actor.schoolId, teacherId: input.teacherId, subjectId: input.subjectId, classId: input.classId, streamId: input.streamId ?? null }
+    });
+    const record = existing
+      ? await this.prisma.teacherSubjectAssignment.update({ where: { id: existing.id }, data: { isActive: true } })
+      : await this.prisma.teacherSubjectAssignment.create({ data: { schoolId: actor.schoolId, teacherId: input.teacherId, subjectId: input.subjectId, classId: input.classId, streamId: input.streamId ?? null } });
+    await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "TEACHER_SUBJECT_ASSIGNED", entityType: "TEACHER_SUBJECT_ASSIGNMENT", entityId: record.id, newValue: record });
+    return record;
+  }
+
+  async createClassTeacherAssignment(actor: CurrentUser, body: unknown) {
+    const input = body as { teacherId?: string; classId?: string; streamId?: string | null; academicYearId?: string; termId?: string | null };
+    if (!input.teacherId || !input.classId || !input.academicYearId) throw new BadRequestException("Teacher, class and academic year are required.");
+    await this.validateAcademicOwnership(actor.schoolId, input.teacherId, null, input.classId, input.streamId ?? null);
+    const year = await this.prisma.academicYear.findFirst({ where: { id: input.academicYearId, schoolId: actor.schoolId } });
+    if (!year) throw new BadRequestException("Academic year does not belong to this school.");
+    if (input.termId) {
+      const term = await this.prisma.term.findFirst({ where: { id: input.termId, academicYear: { schoolId: actor.schoolId } } });
+      if (!term) throw new BadRequestException("Term does not belong to this school.");
+    }
+    const existing = await this.prisma.classTeacherAssignment.findFirst({
+      where: { schoolId: actor.schoolId, teacherId: input.teacherId, classId: input.classId, streamId: input.streamId ?? null, academicYearId: input.academicYearId }
+    });
+    const record = existing
+      ? await this.prisma.classTeacherAssignment.update({ where: { id: existing.id }, data: { termId: input.termId ?? null, isActive: true } })
+      : await this.prisma.classTeacherAssignment.create({ data: { schoolId: actor.schoolId, teacherId: input.teacherId, classId: input.classId, streamId: input.streamId ?? null, academicYearId: input.academicYearId, termId: input.termId ?? null } });
+    await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "CLASS_TEACHER_ASSIGNED", entityType: "CLASS_TEACHER_ASSIGNMENT", entityId: record.id, newValue: record });
+    return record;
+  }
+
   async createGradeBoundary(actor: CurrentUser, body: unknown) {
     const input = gradeBoundarySchema.parse(body);
     const record = await this.prisma.gradeBoundary.create({ data: { schoolId: actor.schoolId, ...input } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "GRADE_BOUNDARY_CREATED", entityType: "GRADE_BOUNDARY", entityId: record.id, newValue: record });
     return record;
+  }
+
+  private async validateAcademicOwnership(schoolId: string, teacherId: string, subjectId: string | null, classId: string, streamId: string | null) {
+    const [teacher, subject, klass] = await Promise.all([
+      this.prisma.teacher.findFirst({ where: { id: teacherId, schoolId } }),
+      subjectId ? this.prisma.subject.findFirst({ where: { id: subjectId, schoolId } }) : Promise.resolve(true),
+      this.prisma.class.findFirst({ where: { id: classId, schoolId } })
+    ]);
+    if (!teacher || !subject || !klass) throw new BadRequestException("Teacher, subject and class must belong to this school.");
+    if (streamId) {
+      const stream = await this.prisma.stream.findFirst({ where: { id: streamId, classId } });
+      if (!stream) throw new BadRequestException("Stream must belong to the selected class.");
+    }
   }
 }

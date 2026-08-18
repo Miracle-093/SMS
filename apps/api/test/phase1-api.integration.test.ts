@@ -13,6 +13,9 @@ describe("Phase 1 core integration", () => {
   let baseUrl: string;
   let prisma: PrismaService;
   let token: string;
+  let dosToken: string;
+  let bursarToken: string;
+  let classTeacherToken: string;
   let schoolId: string;
   let classOneId: string;
   let classTwoId: string;
@@ -28,11 +31,17 @@ describe("Phase 1 core integration", () => {
     const login = await post("/auth/login", { email: "admin@aethina.test", password: "AdminPass123", deviceId: "00000000-0000-4000-8000-000000000001" });
     token = login.accessToken;
     schoolId = login.user.schoolId;
+    const dosLogin = await post("/auth/login", { email: "dos@satelitesecondary.test", password: "DosPass123", deviceId: "00000000-0000-4000-8000-000000000001" });
+    dosToken = dosLogin.accessToken;
+    const bursarLogin = await post("/auth/login", { email: "bursar@aethina.test", password: "BursarPass123", deviceId: "00000000-0000-4000-8000-000000000001" });
+    bursarToken = bursarLogin.accessToken;
+    const classTeacherLogin = await post("/auth/login", { email: "grace.otieno@aethina.test", password: "TeacherPass123", deviceId: "00000000-0000-4000-8000-000000000001" });
+    classTeacherToken = classTeacherLogin.accessToken;
 
     const config = await authGet("/school-config");
     academicYearId = config.school.currentAcademicYearId ?? config.academicYears[0].id;
-    classOneId = config.classes.find((item: { name: string }) => item.name === "Grade 1").id;
-    classTwoId = config.classes.find((item: { name: string }) => item.name === "Grade 2").id;
+    classOneId = config.classes.find((item: { name: string }) => item.name === "Senior One").id;
+    classTwoId = config.classes.find((item: { name: string }) => item.name === "Senior Two").id;
     streamId = config.classes.find((item: { id: string }) => item.id === classOneId).streams[0].id;
   }, 60_000);
 
@@ -43,21 +52,24 @@ describe("Phase 1 core integration", () => {
   it("logs in with permissions and creates a student with portal credentials", async () => {
     const admissionNo = `TST-${Date.now()}`;
     const registration = registrationBody(admissionNo);
-    const created = await authPost("/students", registration);
+    const blockedAdminCreate = await rawPost("/students", registration, token);
+    expect(blockedAdminCreate.status).toBe(403);
+
+    const created = await authPostAs(dosToken, "/students", registration);
 
     expect(created.student.admissionNo).toBe(admissionNo);
     expect(created.portal.username).toBe(admissionNo.toLowerCase());
     expect(created.portalTemporaryPassword).toMatch(/^Ae-/);
     expect(created.portal.passwordHash).toBeUndefined();
 
-    const duplicate = await rawPost("/students", registration, token);
+    const duplicate = await rawPost("/students", registration, dosToken);
     expect(duplicate.status).toBe(409);
 
-    const reset = await authPost(`/students/${created.student.id}/reset-portal-credentials`, {});
+    const reset = await authPostAs(dosToken, `/students/${created.student.id}/reset-portal-credentials`, {});
     expect(reset.temporaryPassword).toMatch(/^Ae-/);
     expect(reset.portal.username).toBe(admissionNo.toLowerCase());
 
-    const promotion = await authPost("/students/promotions", {
+    const promotion = await authPostAs(dosToken, "/students/promotions", {
       studentId: created.student.id,
       previousAcademicYearId: academicYearId,
       previousClassId: classOneId,
@@ -140,7 +152,7 @@ describe("Phase 1 core integration", () => {
     const config = await authGet("/school-config");
     const termId = config.school.currentTermId;
     const feeName = `Integration Tuition ${Date.now()}`;
-    const fee = await authPost("/finance/fee-structures", {
+    const fee = await authPostAs(bursarToken, "/finance/fee-structures", {
       academicYearId,
       termId,
       classId: classOneId,
@@ -163,10 +175,10 @@ describe("Phase 1 core integration", () => {
       dueDate: new Date("2026-03-01").toISOString(),
       isMandatory: true,
       isActive: true
-    }, token);
+    }, bursarToken);
     expect(duplicate.status).toBe(409);
 
-    const generated = await authPost("/finance/invoices/generate", {
+    const generated = await authPostAs(bursarToken, "/finance/invoices/generate", {
       academicYearId,
       termId,
       classId: classOneId,
@@ -179,7 +191,7 @@ describe("Phase 1 core integration", () => {
     expect(invoice).toBeTruthy();
 
     const paymentReference = `INT-PAY-${Date.now()}`;
-    const payment = await authPost("/finance/payments", {
+    const payment = await authPostAs(bursarToken, "/finance/payments", {
       invoiceId: invoice.id,
       amount: 1000,
       method: "CASH",
@@ -196,7 +208,7 @@ describe("Phase 1 core integration", () => {
       method: "CASH",
       reference: paymentReference,
       paidAt: new Date().toISOString()
-    }, token);
+    }, bursarToken);
     expect(duplicatePayment.status).toBe(409);
 
     const overpayment = await rawPost("/finance/payments", {
@@ -205,7 +217,7 @@ describe("Phase 1 core integration", () => {
       method: "CASH",
       reference: `INT-OVER-${Date.now()}`,
       paidAt: new Date().toISOString()
-    }, token);
+    }, bursarToken);
     expect(overpayment.status).toBe(400);
 
     const budget = await authPost("/finance/budgets", {
@@ -244,9 +256,24 @@ describe("Phase 1 core integration", () => {
     }
   }, 60_000);
 
+  it("requires class teacher preparation and DOS final report-card publishing", async () => {
+    const prepared = await authPostAs(classTeacherToken, "/academics/report-cards/generate", { termId: await currentTermId() });
+    expect(prepared.createdOrUpdated).toBeGreaterThan(0);
+
+    const scopedCards = await authGetAs(classTeacherToken, "/academics/report-cards?status=PREPARED");
+    expect(scopedCards.length).toBeGreaterThan(0);
+
+    const blockedAdminPublish = await rawPost(`/academics/report-cards/${scopedCards[0].id}/publish`, {}, token);
+    expect(blockedAdminPublish.status).toBe(403);
+
+    const published = await authPostAs(dosToken, `/academics/report-cards/${scopedCards[0].id}/publish`, {});
+    expect(published.status).toBe("PUBLISHED");
+    expect(published.finalApprovedBy).toBeTruthy();
+  }, 60_000);
+
   it("supports portal login while blocking portal users from staff endpoints", async () => {
     const portalLogin = await post("/auth/portal-login", {
-      username: "adm-001",
+      username: "sat-s1-001",
       password: "StudentPass123",
       deviceId: "00000000-0000-4000-8000-000000000001"
     });
@@ -255,7 +282,7 @@ describe("Phase 1 core integration", () => {
     const home = await rawGet("/portal/home", portalLogin.accessToken);
     expect(home.status).toBe(200);
     const portalHome = await home.json();
-    expect(portalHome.student.admissionNo).toBe("ADM-001");
+    expect(portalHome.student.admissionNo).toBe("SAT-S1-001");
 
     const staffOnly = await rawGet("/students", portalLogin.accessToken);
     expect(staffOnly.status).toBe(403);
@@ -270,7 +297,11 @@ describe("Phase 1 core integration", () => {
   }, 60_000);
 
   async function authGet(path: string) {
-    const response = await fetch(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    return authGetAs(token, path);
+  }
+
+  async function authGetAs(accessToken: string, path: string) {
+    const response = await fetch(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${accessToken}` } });
     if (!response.ok) {
       throw new Error(`${path} failed with ${response.status}: ${await response.text()}`);
     }
@@ -278,11 +309,20 @@ describe("Phase 1 core integration", () => {
   }
 
   async function authPost(path: string, body: unknown) {
-    const response = await rawPost(path, body, token);
+    return authPostAs(token, path, body);
+  }
+
+  async function authPostAs(accessToken: string, path: string, body: unknown) {
+    const response = await rawPost(path, body, accessToken);
     if (!response.ok) {
       throw new Error(`${path} failed with ${response.status}: ${await response.text()}`);
     }
     return response.json();
+  }
+
+  async function currentTermId() {
+    const config = await authGet("/school-config");
+    return config.school.currentTermId;
   }
 
   async function post(path: string, body: unknown) {

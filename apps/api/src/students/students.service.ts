@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { Prisma } from "@prisma/client";
 import { studentPromotionSchema, studentRegistrationSchema } from "@aethina/validation";
 import type { CurrentUser } from "@aethina/shared-types";
-import { ApprovalStatus, SyncStatus } from "@aethina/shared-types";
+import { ApprovalStatus, PermissionKey, SyncStatus } from "@aethina/shared-types";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { AuditService } from "../audit/audit.service.js";
 import { PasswordService } from "../auth/password.service.js";
@@ -15,15 +15,17 @@ export class StudentsService {
     @Inject(PasswordService) private readonly passwords: PasswordService
   ) {}
 
-  list(schoolId: string, query: Record<string, string | undefined>) {
+  async list(actor: CurrentUser, query: Record<string, string | undefined>) {
+    const visibility = await this.studentVisibility(actor);
     return this.prisma.student.findMany({
       where: {
-        schoolId,
+        schoolId: actor.schoolId,
         deletedAt: null,
         status: query.status as never,
         currentClassId: query.classId,
         currentStreamId: query.streamId,
         currentAcademicYearId: query.academicYearId,
+        AND: visibility,
         OR: query.search
           ? [
               { admissionNo: { contains: query.search, mode: "insensitive" } },
@@ -44,9 +46,10 @@ export class StudentsService {
     });
   }
 
-  profile(schoolId: string, id: string) {
+  async profile(actor: CurrentUser, id: string) {
+    const visibility = await this.studentVisibility(actor);
     return this.prisma.student.findFirstOrThrow({
-      where: { schoolId, id, deletedAt: null },
+      where: { schoolId: actor.schoolId, id, deletedAt: null, AND: visibility },
       include: {
         currentClass: true,
         currentStream: true,
@@ -278,5 +281,28 @@ export class StudentsService {
         throw new BadRequestException("Stream must belong to the selected class.");
       }
     }
+  }
+
+  private async studentVisibility(actor: CurrentUser): Promise<Prisma.StudentWhereInput[]> {
+    const permissions = new Set(actor.permissions);
+    const canSeeWholeSchool =
+      permissions.has(PermissionKey.AdmissionsManage) ||
+      permissions.has(PermissionKey.AcademicSetupManage) ||
+      permissions.has(PermissionKey.FinanceRead) ||
+      permissions.has(PermissionKey.FinanceManage) ||
+      permissions.has(PermissionKey.ApprovalReview) ||
+      permissions.has(PermissionKey.RiskReview);
+    if (canSeeWholeSchool) return [];
+    const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
+    if (!teacher) return [{ id: "__no_students_for_user__" }];
+    const [subjectAssignments, classAssignments] = await Promise.all([
+      this.prisma.teacherSubjectAssignment.findMany({ where: { schoolId: actor.schoolId, teacherId: teacher.id, isActive: true } }),
+      this.prisma.classTeacherAssignment.findMany({ where: { schoolId: actor.schoolId, teacherId: teacher.id, isActive: true } })
+    ]);
+    const ownership = [...subjectAssignments, ...classAssignments].map((assignment) => ({
+      currentClassId: assignment.classId,
+      ...(assignment.streamId ? { currentStreamId: assignment.streamId } : {})
+    }));
+    return ownership.length ? [{ OR: ownership }] : [{ id: "__no_students_for_user__" }];
   }
 }
