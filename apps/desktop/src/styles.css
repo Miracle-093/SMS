@@ -1,11 +1,13 @@
 :root {
   --aethina-gold: #e0b332;
   --charcoal: #12372f;
+  --forest: #0f4d3f;
+  --navy: #20324a;
   --ink: #18241f;
   --muted: #63716c;
   --line: #d9e3dd;
   --surface: #ffffff;
-  --page: #f4f7f2;
+  --page: #f3f6f4;
   --success: #18634f;
   --danger: #a23424;
   --accent: #8b1d2c;
@@ -20,6 +22,7 @@
 
 body {
   margin: 0;
+  min-width: 320px;
 }
 
 button,
@@ -30,20 +33,51 @@ textarea {
 }
 
 button {
-  min-height: 36px;
+  min-height: 40px;
   border: 0;
   border-radius: 6px;
   padding: 0 14px;
-  background: var(--charcoal);
+  background: linear-gradient(135deg, var(--forest), var(--charcoal));
   color: #fff;
   font-weight: 700;
   cursor: pointer;
+  transition: transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease;
+  box-shadow: 0 8px 18px rgba(18, 55, 47, .12);
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(18, 55, 47, .18);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: .62;
+  transform: none;
+  box-shadow: none;
 }
 
 button.ghost {
   background: #fffaf0;
   color: var(--charcoal);
   border: 1px solid rgba(212, 175, 55, .45);
+  box-shadow: none;
+}
+
+button.ghost:hover {
+  background: #fff3ce;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(224, 179, 50, .45);
+  outline-offset: 2px;
 }
 
 .login-screen {
@@ -52,8 +86,8 @@ button.ghost {
   place-items: center;
   padding: 24px;
   background:
-    linear-gradient(135deg, rgba(18, 55, 47, .92), rgba(139, 29, 44, .80)),
-    radial-gradient(circle at 15% 10%, rgba(224, 179, 50, .32), transparent 30%),
+    linear-gradient(135deg, rgba(18, 55, 47, .94), rgba(139, 29, 44, .78)),
+    linear-gradient(0deg, rgba(224, 179, 50, .18), transparent 42%),
     #12372f;
 }
 
@@ -64,6 +98,29 @@ button.ghost {
   border-radius: 8px;
   padding: 24px;
   box-shadow: 0 18px 42px rgba(24, 32, 47, 0.12);
+}
+
+.login-panel h1 {
+  margin: 8px 0 6px;
+  font-size: 42px;
+  line-height: 1;
+}
+
+.login-copy {
+  margin: 0 0 16px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.demo-strip {
+  border: 1px solid rgba(224, 179, 50, .48);
+  border-radius: 8px;
+  background: #fff7df;
+  color: #59420b;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  margin: 12px 0;
 }
 
 .login-panel label,
@@ -84,6 +141,13 @@ textarea {
   background: #fff;
   color: #18202f;
   padding: 8px 10px;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: #9eb1a8;
 }
 
 textarea {
@@ -94,7 +158,7 @@ textarea {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 232px 1fr;
+  grid-template-columns: 256px 1fr;
 }
 
 .sidebar {
@@ -104,6 +168,10 @@ textarea {
   flex-direction: column;
   justify-content: space-between;
   padding: 22px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
 }
 
 .sidebar h1,
@@ -136,6 +204,8 @@ nav button {
   background: transparent;
   color: #c8d3dc;
   text-align: left;
+  box-shadow: none;
+  min-height: 38px;
 }
 
 nav button.active {
@@ -146,7 +216,12 @@ nav button.active {
 
 .workspace {
   min-width: 0;
-  padding: 22px;
+  padding: 24px;
+}
+
+.mobile-admin-bar,
+.mobile-section-nav {
+  display: none;
 }
 
 .topbar,
@@ -155,6 +230,14 @@ nav button.active {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.topbar {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .88);
+  padding: 16px;
+  box-shadow: 0 12px 32px rgba(18, 55, 47, .06);
 }
 
 .status-strip {
@@ -227,6 +310,7 @@ nav button.active {
   background: #fff;
   border: 1px solid #d8e0e7;
   border-radius: 8px;
+  min-width: 0;
 }
 
 .list-pane,
@@ -246,6 +330,12 @@ table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  min-width: 680px;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
 }
 
 th,
@@ -262,7 +352,7 @@ th {
 }
 
 tbody tr {
-  cursor: pointer;
+  cursor: default;
 }
 
 tbody tr:hover {
@@ -279,6 +369,7 @@ tbody tr:hover {
   padding: 0 8px;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .profile,
@@ -364,6 +455,13 @@ dd {
   border-radius: 8px;
   min-width: 0;
   overflow: hidden;
+  box-shadow: 0 10px 28px rgba(18, 55, 47, .06);
+}
+
+.operation-panel > table,
+.list-pane > table {
+  display: block;
+  overflow-x: auto;
 }
 
 .operation-panel > .section-heading {
@@ -432,11 +530,18 @@ dd {
 .kiosk-panel {
   display: grid;
   gap: 12px;
+  max-width: 560px;
 }
 
 .kiosk-panel h1 {
   margin: 0;
   font-size: 22px;
+}
+
+.kiosk-lede {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .kiosk-panel label {
@@ -451,6 +556,10 @@ dd {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.row-actions button {
+  min-height: 34px;
 }
 
 .kiosk-correction {
@@ -478,7 +587,7 @@ dd {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 
@@ -516,11 +625,30 @@ dd {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  background: transparent;
+  border: 0;
 }
 
 .tabs button.active {
   background: var(--charcoal);
   color: #fff;
+}
+
+.summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid #edf1f4;
+}
+
+.summary-strip span {
+  border-radius: 999px;
+  background: #edf7f3;
+  color: var(--forest);
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .inline-form {
@@ -576,6 +704,47 @@ small {
     display: none;
   }
 
+  .workspace {
+    padding: 14px;
+    padding-bottom: 24px;
+  }
+
+  .mobile-admin-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: -14px -14px 14px;
+    padding: 12px 14px;
+    background: var(--charcoal);
+    color: #fff;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .mobile-admin-bar .eyebrow {
+    margin-bottom: 2px;
+  }
+
+  .mobile-admin-bar .ghost {
+    background: rgba(255, 255, 255, .12);
+    color: #fff;
+    border-color: rgba(255, 255, 255, .24);
+  }
+
+  .mobile-section-nav {
+    display: block;
+    margin: 12px 0;
+  }
+
+  .mobile-section-nav label {
+    display: grid;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
   .content-grid,
   .config-band,
   .operations-grid,
@@ -601,5 +770,51 @@ small {
   .operation-panel.wide-panel,
   .setup-panel.wide-panel {
     grid-column: auto;
+  }
+
+  .topbar {
+    display: grid;
+    align-items: start;
+  }
+
+  .status-strip {
+    width: 100%;
+  }
+
+  .status-strip button {
+    flex: 1;
+  }
+}
+
+@media (max-width: 620px) {
+  .login-panel {
+    padding: 20px;
+  }
+
+  .login-panel h1 {
+    font-size: 34px;
+  }
+
+  .topbar h2 {
+    font-size: 24px;
+  }
+
+  .config-band {
+    gap: 8px;
+  }
+
+  .section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .actions,
+  .row-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  button {
+    min-height: 44px;
   }
 }

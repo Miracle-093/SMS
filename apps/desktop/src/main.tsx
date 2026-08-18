@@ -30,6 +30,24 @@ type Session = {
 
 type ActiveView = "dashboard" | "students" | "academics" | "timetable" | "finance" | "budgets" | "inventory" | "payroll" | "notifications" | "approvals" | "attendance" | "school" | "sync" | "risk" | "audit";
 
+const appSections: Array<{ id: ActiveView; label: string }> = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "students", label: "Students" },
+  { id: "academics", label: "Academics" },
+  { id: "timetable", label: "Timetable" },
+  { id: "finance", label: "Finance" },
+  { id: "budgets", label: "Budgets" },
+  { id: "inventory", label: "Inventory" },
+  { id: "payroll", label: "Payroll" },
+  { id: "notifications", label: "Notifications" },
+  { id: "approvals", label: "Approvals" },
+  { id: "school", label: "School Setup" },
+  { id: "attendance", label: "Attendance" },
+  { id: "sync", label: "Sync Review" },
+  { id: "risk", label: "Risk Alerts" },
+  { id: "audit", label: "Audit" }
+];
+
 type SchoolConfig = {
   school: { id: string; name: string; code: string; phone?: string; email?: string; address?: string; admissionNumberPrefix?: string; currentAcademicYearId?: string; currentTermId?: string };
   academicYears: Array<{ id: string; name: string; startsAt?: string; endsAt?: string; isActive: boolean; terms: Array<{ id: string; name: string; startsAt?: string; endsAt?: string; isCurrent: boolean }> }>;
@@ -481,26 +499,19 @@ function App() {
           <h1>Administration</h1>
         </div>
         <nav>
-          <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")}>Dashboard</button>
-          <button className={activeView === "students" ? "active" : ""} onClick={() => setActiveView("students")}>Students</button>
-          <button className={activeView === "academics" ? "active" : ""} onClick={() => setActiveView("academics")}>Academics</button>
-          <button className={activeView === "timetable" ? "active" : ""} onClick={() => setActiveView("timetable")}>Timetable</button>
-          <button className={activeView === "finance" ? "active" : ""} onClick={() => setActiveView("finance")}>Finance</button>
-          <button className={activeView === "budgets" ? "active" : ""} onClick={() => setActiveView("budgets")}>Budgets</button>
-          <button className={activeView === "inventory" ? "active" : ""} onClick={() => setActiveView("inventory")}>Inventory</button>
-          <button className={activeView === "payroll" ? "active" : ""} onClick={() => setActiveView("payroll")}>Payroll</button>
-          <button className={activeView === "notifications" ? "active" : ""} onClick={() => setActiveView("notifications")}>Notifications</button>
-          <button className={activeView === "approvals" ? "active" : ""} onClick={() => setActiveView("approvals")}>Approvals</button>
-          <button className={activeView === "school" ? "active" : ""} onClick={() => setActiveView("school")}>School Setup</button>
-          <button className={activeView === "attendance" ? "active" : ""} onClick={() => setActiveView("attendance")}>Attendance</button>
-          <button className={activeView === "sync" ? "active" : ""} onClick={() => setActiveView("sync")}>Sync Review</button>
-          <button className={activeView === "risk" ? "active" : ""} onClick={() => setActiveView("risk")}>Risk Alerts</button>
-          <button className={activeView === "audit" ? "active" : ""} onClick={() => setActiveView("audit")}>Audit</button>
+          {appSections.map((section) => <button key={section.id} className={activeView === section.id ? "active" : ""} onClick={() => setActiveView(section.id)}>{section.label}</button>)}
         </nav>
         <button className="ghost" onClick={logout}>Logout</button>
       </aside>
 
       <section className="workspace">
+        <header className="mobile-admin-bar">
+          <div>
+            <p className="eyebrow">Satelite Secondary</p>
+            <strong>{session.user.displayName}</strong>
+          </div>
+          <button className="ghost" onClick={logout}>Logout</button>
+        </header>
         <header className="topbar">
           <div>
             <p className="eyebrow">{config?.school.name ?? "School workspace"}</p>
@@ -513,6 +524,15 @@ function App() {
             <button onClick={synchronize}>Sync</button>
           </div>
         </header>
+
+        <div className="mobile-section-nav">
+          <label>
+            Section
+            <select value={activeView} onChange={(event) => setActiveView(event.target.value as ActiveView)}>
+              {appSections.map((section) => <option key={section.id} value={section.id}>{section.label}</option>)}
+            </select>
+          </label>
+        </div>
 
         {message && <div className="notice">{message}</div>}
 
@@ -618,6 +638,8 @@ function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) =
       <form className="login-panel" onSubmit={async (event) => { event.preventDefault(); setError(""); try { await onLogin(email, password); } catch { setError("Check your email and password."); } }}>
         <p className="eyebrow">Satelite Secondary</p>
         <h1>Sign in</h1>
+        <p className="login-copy">Admin, bursar, teacher, attendance kiosk, finance, academics, inventory, payroll, approvals, and offline sync.</p>
+        <div className="demo-strip">Demo admin: admin@aethina.test / AdminPass123</div>
         <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
         <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         {error && <p className="error">{error}</p>}
@@ -810,8 +832,8 @@ function AttendanceView({ api, setMessage }: { api: (path: string, init?: Reques
       api(`/teacher-attendance?date=${encodeURIComponent(date)}`),
       api("/teacher-attendance/correction-requests")
     ]);
-    setRecords(dayRows);
-    setCorrections(pendingRows);
+    setRecords(asArray<AttendanceRecord>(dayRows));
+    setCorrections(asArray<AttendanceRecord>(pendingRows));
   }
 
   useEffect(() => {
@@ -885,7 +907,7 @@ function SyncReviewView({ api, setMessage }: { api: (path: string, init?: Reques
   const [conflicts, setConflicts] = useState<SyncConflictRecord[]>([]);
 
   async function load() {
-    setConflicts(await api("/sync/conflicts"));
+    setConflicts(asArray<SyncConflictRecord>(await api("/sync/conflicts")));
   }
 
   useEffect(() => {
@@ -930,7 +952,7 @@ function AuditView({ api }: { api: (path: string, init?: RequestInit) => Promise
 
   async function load() {
     const query = new URLSearchParams(stripEmpty({ action, entityType, take: "75" }));
-    setRecords(await api(`/audit?${query.toString()}`));
+    setRecords(asArray<AuditRecord>(await api(`/audit?${query.toString()}`)));
   }
 
   useEffect(() => {
@@ -1127,11 +1149,11 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
       readLocalExpenses()
     ]);
     setOverview(nextOverview);
-    setFees(nextFees);
-    setInvoices(nextInvoices);
-    setExpenses(nextExpenses);
-    setLocalPayments(pendingPayments);
-    setLocalExpenses(pendingExpenses);
+    setFees(asArray<FeeStructureRecord>(nextFees));
+    setInvoices(asArray<InvoiceRecord>(nextInvoices));
+    setExpenses(asArray<any>(nextExpenses));
+    setLocalPayments(asArray<any>(pendingPayments));
+    setLocalExpenses(asArray<any>(pendingExpenses));
   }
 
   useEffect(() => {
@@ -1272,8 +1294,9 @@ function BudgetsView({ api, config, session, online, refreshOfflineState, setMes
   const [request, setRequest] = useState({ budgetId: "", amount: "", reason: "" });
   async function load() {
     const rows = await api("/finance/budgets");
-    setBudgets(rows);
-    setRequest((current) => ({ ...current, budgetId: current.budgetId || rows[0]?.id || "" }));
+    const nextRows = asArray<BudgetRecord>(rows);
+    setBudgets(nextRows);
+    setRequest((current) => ({ ...current, budgetId: current.budgetId || nextRows[0]?.id || "" }));
   }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Budgets unavailable.")); }, []);
   async function createBudget(event: React.FormEvent) {
@@ -1324,7 +1347,7 @@ function BudgetsView({ api, config, session, online, refreshOfflineState, setMes
 
 function ApprovalsView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
   const [rows, setRows] = useState<ApprovalRecord[]>([]);
-  async function load() { setRows(await api("/approvals")); }
+  async function load() { setRows(asArray<ApprovalRecord>(await api("/approvals"))); }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Approvals unavailable.")); }, []);
   async function decide(id: string, decision: string) {
     await api(`/approvals/${id}/decision`, { method: "POST", body: JSON.stringify({ decision, comment: `Desktop ${decision.toLowerCase()} decision` }) });
@@ -1336,7 +1359,7 @@ function ApprovalsView({ api, setMessage }: { api: (path: string, init?: Request
 
 function RiskAlertsView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
   const [rows, setRows] = useState<RiskAlertRecord[]>([]);
-  async function load() { setRows(await api("/risk-alerts")); }
+  async function load() { setRows(asArray<RiskAlertRecord>(await api("/risk-alerts"))); }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Risk alerts unavailable.")); }, []);
   async function review(id: string, status: string) {
     await api(`/risk-alerts/${id}/review`, { method: "POST", body: JSON.stringify({ status, notes: `Reviewed in desktop as ${status}` }) });
@@ -1352,9 +1375,9 @@ function AcademicsAdminView({ api, config, setMessage }: { api: (path: string, i
   const [cards, setCards] = useState<any[]>([]);
   async function load() {
     const [nextExams, nextAssessments, nextCards] = await Promise.all([api("/academics/examinations"), api("/academics/assessments"), api("/academics/report-cards")]);
-    setExams(nextExams);
-    setAssessments(nextAssessments);
-    setCards(nextCards);
+    setExams(asArray<any>(nextExams));
+    setAssessments(asArray<any>(nextAssessments));
+    setCards(asArray<any>(nextCards));
   }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Academics unavailable.")); }, []);
   const termName = config?.academicYears.flatMap((year) => year.terms).find((term) => term.id === config.school.currentTermId)?.name ?? "-";
@@ -1363,7 +1386,7 @@ function AcademicsAdminView({ api, config, setMessage }: { api: (path: string, i
 
 function TimetableAdminView({ api, config, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; setMessage: (message: string) => void }) {
   const [rows, setRows] = useState<any[]>([]);
-  async function load() { setRows(await api("/timetable")); }
+  async function load() { setRows(asArray<any>(await api("/timetable"))); }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Timetable unavailable.")); }, []);
   const subjects = new Map((config?.subjects ?? []).map((subject) => [subject.id, subject.name]));
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Timetable</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["Day", "Period", "Subject", "Time", "Room"]} rows={rows.map((row) => [`Day ${row.dayOfWeek}`, row.periodNumber, subjects.get(row.subjectId) ?? row.subjectId, `${row.startsAt}-${row.endsAt}`, row.room ?? "-"])} /></section>;
@@ -1374,8 +1397,8 @@ function InventoryAdminView({ api, setMessage }: { api: (path: string, init?: Re
   const [movements, setMovements] = useState<any[]>([]);
   async function load() {
     const [nextItems, nextMovements] = await Promise.all([api("/inventory/items"), api("/inventory/movements")]);
-    setItems(nextItems);
-    setMovements(nextMovements);
+    setItems(asArray<any>(nextItems));
+    setMovements(asArray<any>(nextMovements));
   }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Inventory unavailable.")); }, []);
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Inventory</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["SKU", "Item", "Category", "Qty", "Reorder"]} rows={items.map((item) => [item.sku, item.name, item.category, item.quantity, item.reorderLevel])} /><FinanceTable headings={["Item", "Type", "Qty", "Status", "Reason"]} rows={movements.slice(0, 30).map((row) => [row.inventoryItem?.name ?? row.inventoryItemId, row.movementType, row.quantity, row.approvalStatus, row.reason])} /></section>;
@@ -1386,8 +1409,8 @@ function PayrollAdminView({ api, setMessage }: { api: (path: string, init?: Requ
   const [records, setRecords] = useState<any[]>([]);
   async function load() {
     const [nextRuns, nextRecords] = await Promise.all([api("/payroll/runs"), api("/payroll/records")]);
-    setRuns(nextRuns);
-    setRecords(nextRecords);
+    setRuns(asArray<any>(nextRuns));
+    setRecords(asArray<any>(nextRecords));
   }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Payroll unavailable.")); }, []);
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Payroll</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["Period", "Status", "Gross", "Deductions", "Net"]} rows={runs.map((run) => [run.period, run.status, ugx(run.grossTotal), ugx(run.deductionTotal), ugx(run.netTotal)])} /><FinanceTable headings={["Teacher", "Period", "Gross", "Deductions", "Net", "Status"]} rows={records.slice(0, 30).map((row) => [row.teacherId, row.period, ugx(row.grossPay), ugx(row.deductions), ugx(row.netPay), row.status])} /></section>;
@@ -1398,19 +1421,19 @@ function NotificationsAdminView({ api, setMessage }: { api: (path: string, init?
   const [announcements, setAnnouncements] = useState<any[]>([]);
   async function load() {
     const [nextNotifications, nextAnnouncements] = await Promise.all([api("/notifications"), api("/announcements?all=true")]);
-    setNotifications(nextNotifications);
-    setAnnouncements(nextAnnouncements);
+    setNotifications(asArray<any>(nextNotifications));
+    setAnnouncements(asArray<any>(nextAnnouncements));
   }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Notifications unavailable.")); }, []);
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Notifications & Announcements</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["Title", "Recipient", "Channel", "Status"]} rows={notifications.slice(0, 30).map((row) => [row.title, `${row.recipientType}${row.recipientId ? `:${row.recipientId}` : ""}`, row.channel, row.status])} /><FinanceTable headings={["Announcement", "Audience", "Priority", "Published"]} rows={announcements.map((row) => [row.title, row.audience, row.priority, dateOnly(row.publishAt)])} /></section>;
 }
 
 function InvoiceTable({ invoices }: { invoices: InvoiceRecord[] }) {
-  return <table><thead><tr><th>Invoice</th><th>Student</th><th>Expected</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td>{invoice.invoiceNo}</td><td>{invoice.student.admissionNo}<br /><small>{invoice.student.firstName} {invoice.student.lastName}</small></td><td>{ugx(invoice.amount)}</td><td>{ugx(invoice.amountPaid)}</td><td>{ugx(invoice.balance)}</td><td><span className="pill">{invoice.status}</span></td></tr>)}{invoices.length === 0 && <tr><td colSpan={6} className="empty">No invoices yet.</td></tr>}</tbody></table>;
+  return <div className="table-scroll"><table><thead><tr><th>Invoice</th><th>Student</th><th>Expected</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td>{invoice.invoiceNo}</td><td>{invoice.student.admissionNo}<br /><small>{invoice.student.firstName} {invoice.student.lastName}</small></td><td>{ugx(invoice.amount)}</td><td>{ugx(invoice.amountPaid)}</td><td>{ugx(invoice.balance)}</td><td><span className="pill">{invoice.status}</span></td></tr>)}{invoices.length === 0 && <tr><td colSpan={6} className="empty">No invoices yet.</td></tr>}</tbody></table></div>;
 }
 
 function FinanceTable({ headings, rows }: { headings: string[]; rows: Array<Array<string | number>> }) {
-  return <table><thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="empty">No records to display.</td></tr>}</tbody></table>;
+  return <div className="table-scroll"><table><thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="empty">No records to display.</td></tr>}</tbody></table></div>;
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -1419,6 +1442,10 @@ function readJson<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
 }
 
 function viewTitle(view: ActiveView) {

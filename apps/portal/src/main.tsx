@@ -21,7 +21,7 @@ const primaryViews = ["home", "academics", "finance", "timetable", "more"] as co
 
 function PortalApp() {
   const [session, setSession] = useState<Session | null>(() => readJson("aethina.portal.session", null));
-  const [username, setUsername] = useState("adm-001");
+  const [username, setUsername] = useState("sat-s1-001");
   const [password, setPassword] = useState("StudentPass123");
   const [active, setActive] = useState("home");
   const [home, setHome] = useState<PortalHome | null>(null);
@@ -92,6 +92,7 @@ function PortalApp() {
           <p className="eyebrow">Satelite Secondary</p>
           <h1>Student Portal</h1>
           <p className="slogan">Kampala, Uganda</p>
+          <div className="demo-strip">Demo: sat-s1-001 / StudentPass123</div>
           <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
           <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
           {error && <p className="error">{error}</p>}
@@ -174,7 +175,7 @@ function AcademicsView({ data }: { data: any }) {
   if (!data) return <Skeleton title="Loading academics" />;
   return (
     <>
-      <h2>Academics</h2>
+      <SectionTitle eyebrow="Uganda grading" title="Academics" helper="Published marks and report cards use D1-F9 grade boundaries." />
       <div className="table">
         {marks.length === 0 && <p className="empty">No published marks yet.</p>}
         {marks.map((mark: any) => <div className="row" key={mark.id}><span>{mark.subject?.name}</span><strong>{mark.score} ({mark.grade ?? "N/A"})</strong></div>)}
@@ -193,7 +194,7 @@ function FinanceView({ data }: { data: any }) {
   const summary = data.summary ?? { expected: 0, paid: 0, balance: 0 };
   return (
     <>
-      <h2>Finance</h2>
+      <SectionTitle eyebrow="Term billing" title="Finance" helper="Track issued invoices, payments received, and outstanding balances." />
       <section className="stats">
         <Metric label="Expected" value={ugx(summary.expected)} />
         <Metric label="Paid" value={ugx(summary.paid)} />
@@ -227,13 +228,17 @@ function MoreView({ setActive, logout, unread }: { setActive: (view: string) => 
 function ListView({ title, rows }: { title: string; rows: any[] }) {
   return (
     <section>
-      <h2>{title}</h2>
+      <SectionTitle eyebrow="Satelite Secondary" title={title} />
       <div className="list">
         {rows.length === 0 && <p className="empty">No records yet.</p>}
         {rows.map((row) => <article key={row.id}><strong>{row.title}</strong><p>{row.message ?? row.body}</p></article>)}
       </div>
     </section>
   );
+}
+
+function SectionTitle({ eyebrow, title, helper }: { eyebrow: string; title: string; helper?: string }) {
+  return <header className="section-title"><p className="eyebrow">{eyebrow}</p><h2>{title}</h2>{helper && <p>{helper}</p>}</header>;
 }
 
 function Metric({ label, value, danger }: { label: string; value: string; danger?: boolean }) {

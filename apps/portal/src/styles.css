@@ -1,6 +1,8 @@
 :root {
   --aethina-gold: #e0b332;
   --charcoal: #12372f;
+  --forest: #0f4d3f;
+  --navy: #20324a;
   --ink: #17211d;
   --muted: #65726d;
   --line: #d9e2dc;
@@ -20,6 +22,7 @@
 
 body {
   margin: 0;
+  min-width: 320px;
 }
 
 button,
@@ -29,18 +32,27 @@ input {
 
 button {
   border: 0;
-  background: var(--charcoal);
+  background: linear-gradient(135deg, var(--forest), var(--charcoal));
   color: #fff;
   min-height: 42px;
   padding: 0 16px;
   border-radius: 7px;
   font-weight: 800;
   cursor: pointer;
+  box-shadow: 0 10px 22px rgba(18, 55, 47, .14);
+  transition: transform .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(18, 55, 47, .18);
 }
 
 button:disabled {
   opacity: .65;
   cursor: wait;
+  transform: none;
+  box-shadow: none;
 }
 
 .text-button {
@@ -56,8 +68,8 @@ button:disabled {
   place-items: center;
   padding: 20px;
   background:
-    linear-gradient(135deg, rgba(18, 55, 47, .92), rgba(139, 29, 44, .80)),
-    radial-gradient(circle at top left, rgba(224, 179, 50, .34), transparent 34%),
+    linear-gradient(135deg, rgba(18, 55, 47, .94), rgba(139, 29, 44, .78)),
+    linear-gradient(0deg, rgba(224, 179, 50, .18), transparent 42%),
     #12372f;
 }
 
@@ -73,6 +85,11 @@ button:disabled {
 .login-panel h1,
 .topline h2 {
   margin: 0 0 6px;
+}
+
+.login-panel h1 {
+  font-size: 40px;
+  line-height: 1;
 }
 
 .slogan {
@@ -94,6 +111,23 @@ input {
   padding: 11px 12px;
 }
 
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid rgba(224, 179, 50, .45);
+  outline-offset: 2px;
+}
+
+.demo-strip {
+  border: 1px solid rgba(224, 179, 50, .48);
+  border-radius: 8px;
+  background: #fff7df;
+  color: #59420b;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  margin: 0 0 16px;
+}
+
 .portal {
   min-height: 100vh;
   display: grid;
@@ -104,6 +138,9 @@ aside {
   background: linear-gradient(180deg, #12372f, #1b2521);
   color: #fff;
   padding: 22px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
 }
 
 aside h1 {
@@ -129,6 +166,7 @@ aside button {
   border: 1px solid transparent;
   color: #dfe5ea;
   margin-bottom: 8px;
+  box-shadow: none;
 }
 
 aside button.active {
@@ -145,6 +183,20 @@ aside button.active {
   width: min(1160px, 100%);
   padding: 28px;
   padding-bottom: 88px;
+}
+
+.section-title {
+  margin-bottom: 16px;
+}
+
+.section-title h2 {
+  margin: 0 0 6px;
+  font-size: 30px;
+}
+
+.section-title p:last-child {
+  margin: 0;
+  color: var(--muted);
 }
 
 .topline {
@@ -248,6 +300,11 @@ aside button.active {
   border-bottom: 1px solid #edf1f4;
 }
 
+.row strong,
+.row span {
+  overflow-wrap: anywhere;
+}
+
 .row:last-child {
   border-bottom: 0;
 }
@@ -315,6 +372,14 @@ aside button.active {
   .content {
     padding: 16px;
     padding-bottom: 94px;
+  }
+
+  .login-panel {
+    padding: 22px;
+  }
+
+  .login-panel h1 {
+    font-size: 34px;
   }
 
   .topline {
