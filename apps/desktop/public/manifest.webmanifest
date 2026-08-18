@@ -1,0 +1,17 @@
+{
+  "name": "Satelite Secondary SMS",
+  "short_name": "Satelite SMS",
+  "description": "Satelite Secondary School administration, teacher, and finance workspace.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3f6f4",
+  "theme_color": "#12372f",
+  "icons": [
+    {
+      "src": "/aethina-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

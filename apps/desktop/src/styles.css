@@ -240,6 +240,49 @@ nav button.active {
   box-shadow: 0 12px 32px rgba(18, 55, 47, .06);
 }
 
+.role-caption {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.role-home {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid rgba(224, 179, 50, .42);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255, 247, 223, .92), rgba(255, 255, 255, .94)),
+    #fff;
+  box-shadow: 0 12px 32px rgba(18, 55, 47, .06);
+}
+
+.role-home h3,
+.role-home p {
+  margin: 0;
+}
+
+.role-home h3 {
+  font-size: 22px;
+}
+
+.role-home p:last-child {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.role-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .status-strip {
   display: flex;
   align-items: center;
@@ -775,6 +818,14 @@ small {
   .topbar {
     display: grid;
     align-items: start;
+  }
+
+  .role-home {
+    grid-template-columns: 1fr;
+  }
+
+  .role-actions {
+    justify-content: flex-start;
   }
 
   .status-strip {

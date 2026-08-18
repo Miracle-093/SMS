@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { SyncEntityType } from "@aethina/shared-types";
+import { PermissionKey, SyncEntityType } from "@aethina/shared-types";
 import {
   addPendingChange,
   clearLocalStudents,
@@ -25,27 +25,40 @@ const deviceId = "00000000-0000-4000-8000-000000000001";
 
 type Session = {
   accessToken: string;
-  user: { id: string; schoolId: string; displayName: string; email: string; permissions: string[]; mustChangePassword: boolean };
+  user: { id: string; schoolId: string; displayName: string; email: string; roles: string[]; permissions: string[]; mustChangePassword: boolean };
 };
 
 type ActiveView = "dashboard" | "students" | "academics" | "timetable" | "finance" | "budgets" | "inventory" | "payroll" | "notifications" | "approvals" | "attendance" | "school" | "sync" | "risk" | "audit";
 
-const appSections: Array<{ id: ActiveView; label: string }> = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "students", label: "Students" },
-  { id: "academics", label: "Academics" },
-  { id: "timetable", label: "Timetable" },
-  { id: "finance", label: "Finance" },
-  { id: "budgets", label: "Budgets" },
-  { id: "inventory", label: "Inventory" },
-  { id: "payroll", label: "Payroll" },
-  { id: "notifications", label: "Notifications" },
-  { id: "approvals", label: "Approvals" },
-  { id: "school", label: "School Setup" },
-  { id: "attendance", label: "Attendance" },
-  { id: "sync", label: "Sync Review" },
-  { id: "risk", label: "Risk Alerts" },
-  { id: "audit", label: "Audit" }
+type AppSection = {
+  id: ActiveView;
+  label: string;
+  group: "Command" | "Learners" | "Academics" | "Finance" | "Operations" | "Governance";
+  permissions: PermissionKey[];
+};
+
+type Persona = {
+  kicker: string;
+  title: string;
+  summary: string;
+};
+
+const appSections: AppSection[] = [
+  { id: "dashboard", label: "Dashboard", group: "Command", permissions: [PermissionKey.DashboardRead] },
+  { id: "students", label: "Students", group: "Learners", permissions: [PermissionKey.StudentsRead] },
+  { id: "academics", label: "Academics", group: "Academics", permissions: [PermissionKey.AcademicsRead, PermissionKey.AcademicsManage, PermissionKey.MarksEntry] },
+  { id: "timetable", label: "Timetable", group: "Academics", permissions: [PermissionKey.AcademicsRead, PermissionKey.TimetableManage] },
+  { id: "finance", label: "Finance", group: "Finance", permissions: [PermissionKey.FinanceRead, PermissionKey.FinanceManage] },
+  { id: "budgets", label: "Budgets", group: "Finance", permissions: [PermissionKey.BudgetManage] },
+  { id: "inventory", label: "Inventory", group: "Operations", permissions: [PermissionKey.InventoryManage] },
+  { id: "payroll", label: "Payroll", group: "Finance", permissions: [PermissionKey.PayrollRead, PermissionKey.PayrollManage] },
+  { id: "notifications", label: "Notifications", group: "Operations", permissions: [PermissionKey.NotificationsManage, PermissionKey.AnnouncementsManage] },
+  { id: "approvals", label: "Approvals", group: "Governance", permissions: [PermissionKey.ApprovalReview] },
+  { id: "school", label: "School Setup", group: "Command", permissions: [PermissionKey.SchoolConfigManage] },
+  { id: "attendance", label: "Staff Attendance", group: "Operations", permissions: [PermissionKey.AttendanceManage] },
+  { id: "sync", label: "Sync Review", group: "Governance", permissions: [PermissionKey.SyncReview] },
+  { id: "risk", label: "Risk Alerts", group: "Governance", permissions: [PermissionKey.RiskReview] },
+  { id: "audit", label: "Audit", group: "Governance", permissions: [PermissionKey.AuditRead] }
 ];
 
 type SchoolConfig = {
@@ -275,9 +288,17 @@ function App() {
   const [message, setMessage] = useState("Ready");
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSync, setLastSync] = useState("Never");
+  const visibleSections = useMemo(() => session ? sectionsForUser(session.user.permissions) : [], [session]);
+  const persona = session ? personaFor(session.user.roles, session.user.permissions) : null;
 
   useEffect(() => {
     void refreshOfflineState();
+  }, []);
+
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    }
   }, []);
 
   useEffect(() => {
@@ -296,6 +317,13 @@ function App() {
       void refreshAll();
     }
   }, [session]);
+
+  useEffect(() => {
+    if (!session || visibleSections.length === 0) return;
+    if (!visibleSections.some((section) => section.id === activeView)) {
+      setActiveView(visibleSections[0].id);
+    }
+  }, [session, visibleSections, activeView]);
 
   const visibleStudents = useMemo(() => {
     const combined = [...localStudents, ...students];
@@ -499,7 +527,7 @@ function App() {
           <h1>Administration</h1>
         </div>
         <nav>
-          {appSections.map((section) => <button key={section.id} className={activeView === section.id ? "active" : ""} onClick={() => setActiveView(section.id)}>{section.label}</button>)}
+          {visibleSections.map((section) => <button key={section.id} className={activeView === section.id ? "active" : ""} onClick={() => setActiveView(section.id)}>{section.label}</button>)}
         </nav>
         <button className="ghost" onClick={logout}>Logout</button>
       </aside>
@@ -516,6 +544,7 @@ function App() {
           <div>
             <p className="eyebrow">{config?.school.name ?? "School workspace"}</p>
             <h2>{viewTitle(activeView)}</h2>
+            {persona && <p className="role-caption">{persona.title} - {persona.summary}</p>}
           </div>
           <div className="status-strip">
             <span className={online ? "status online" : "status offline"}>{online ? "Online" : "Offline"}</span>
@@ -529,10 +558,12 @@ function App() {
           <label>
             Section
             <select value={activeView} onChange={(event) => setActiveView(event.target.value as ActiveView)}>
-              {appSections.map((section) => <option key={section.id} value={section.id}>{section.label}</option>)}
+              {visibleSections.map((section) => <option key={section.id} value={section.id}>{section.label}</option>)}
             </select>
           </label>
         </div>
+
+        {persona && <RoleHomeCard persona={persona} sections={visibleSections} setActiveView={setActiveView} />}
 
         {message && <div className="notice">{message}</div>}
 
@@ -646,6 +677,21 @@ function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) =
         <button type="submit">Login</button>
       </form>
     </main>
+  );
+}
+
+function RoleHomeCard({ persona, sections, setActiveView }: { persona: Persona; sections: AppSection[]; setActiveView: (view: ActiveView) => void }) {
+  return (
+    <section className="role-home">
+      <div>
+        <p className="eyebrow">{persona.kicker}</p>
+        <h3>{persona.title}</h3>
+        <p>{persona.summary}</p>
+      </div>
+      <div className="role-actions">
+        {sections.slice(0, 5).map((section) => <button key={section.id} type="button" className="ghost" onClick={() => setActiveView(section.id)}>{section.label}</button>)}
+      </div>
+    </section>
   );
 }
 
@@ -1446,6 +1492,49 @@ function readJson<T>(key: string, fallback: T): T {
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
+}
+
+function sectionsForUser(permissions: string[]) {
+  const permissionSet = new Set(permissions);
+  return appSections.filter((section) => section.permissions.some((permission) => permissionSet.has(permission)));
+}
+
+function personaFor(roles: string[], permissions: string[]): Persona {
+  const roleText = roles.join(" ").toLowerCase();
+  const permissionSet = new Set(permissions);
+  if (roleText.includes("administrator")) {
+    return {
+      kicker: "Full command center",
+      title: "School Administrator Console",
+      summary: "Complete oversight of learners, academics, finance, operations, approvals, risk, sync, and audit."
+    };
+  }
+  if (roleText.includes("head teacher")) {
+    return {
+      kicker: "Academic leadership",
+      title: "Head Teacher Workspace",
+      summary: "Academic supervision, student progress, timetable coordination, approvals, and school communication."
+    };
+  }
+  if (roleText.includes("bursar") || roleText.includes("accountant") || permissionSet.has(PermissionKey.FinanceManage)) {
+    return {
+      kicker: "Finance office",
+      title: "Bursar & Accounts Workspace",
+      summary: "Fees, invoices, payments, expenses, budgets, payroll records, and finance reporting."
+    };
+  }
+  if (roleText.includes("teacher") || permissionSet.has(PermissionKey.MarksEntry)) {
+    return {
+      kicker: "Teaching workspace",
+      title: "Teacher Workspace",
+      summary: "Student lists, marks entry, academic records, timetable, and staff attendance access."
+    };
+  }
+  return {
+    kicker: "Role workspace",
+    title: "Satelite Secondary Workspace",
+    summary: "Your available sections are based on the permissions assigned by the school administrator."
+  };
 }
 
 function viewTitle(view: ActiveView) {

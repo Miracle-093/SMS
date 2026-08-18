@@ -25,6 +25,8 @@ Live demo:
 7. Open `Approvals` to approve or reject budget, expense, payroll, and payment-reversal requests.
 8. Open `Audit` to inspect sensitive administrative activity.
 
+Administrator access includes every Phase 1 section: Dashboard, Students, Academics, Timetable, Finance, Budgets, Inventory, Payroll, Notifications, Approvals, School Setup, Staff Attendance, Sync Review, Risk Alerts, and Audit.
+
 ## Finance
 
 1. Sign in as the bursar.
@@ -34,6 +36,8 @@ Live demo:
 5. Submit high-value expenses for approval.
 6. Check `Risk Alerts` for high-value transactions, waivers, reversals, and budget warnings.
 
+The bursar workspace is intentionally finance-focused. It shows Dashboard, Students, Finance, Budgets, and Payroll, while hiding academic administration, school setup, inventory, sync review, and audit controls.
+
 ## Academics
 
 1. Sign in as an administrator or teacher.
@@ -41,6 +45,8 @@ Live demo:
 3. Review exams, assessments, marks, and report cards.
 4. Use Uganda grading boundaries: `D1`, `D2`, `C3`, `C4`, `C5`, `C6`, `P7`, `P8`, `F9`.
 5. Publish approved report cards so students and guardians can see them in the portal.
+
+The teacher workspace shows Students, Academics, Timetable, and Staff Attendance. Finance, payroll, budgets, inventory, school setup, risk, sync review, and audit are hidden for ordinary teachers.
 
 ## Teacher Attendance
 
@@ -66,3 +72,13 @@ Live demo:
 6. Review sensitive conflicts as an administrator.
 
 Finance, payroll, budget, and inventory conflicts are never resolved with last-write-wins.
+
+## Installing As An App
+
+The online admin shell and student portal are PWA-ready:
+
+1. Open the correct live URL in Chrome or Edge.
+2. Use the browser install option from the address bar or menu.
+3. Launch the installed app from the desktop, Start menu, or phone home screen.
+
+Install the admin app for administrators, teachers, and bursars. Install the student portal for parents and students.

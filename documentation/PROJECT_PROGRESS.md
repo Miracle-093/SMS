@@ -212,6 +212,8 @@ The UI has been improved across the admin shell and student portal:
 
 - Dedicated online Admin / Teacher / Bursar app deployed.
 - Student Portal kept separate for students and parents.
+- Admin app navigation now filters visible sections by the logged-in user's permissions.
+- Role context cards now distinguish the School Administrator Console, Bursar & Accounts Workspace, and Teacher Workspace.
 - Mobile navigation added for the admin app.
 - Responsive layouts improved for phone and desktop screens.
 - Tables made scroll-safe on small screens.
@@ -220,6 +222,7 @@ The UI has been improved across the admin shell and student portal:
 - Portal default login corrected to the Satelite student account.
 - Dashboard, finance, attendance, portal finance, and portal navigation polished.
 - Admin sections hardened against unexpected API list responses to prevent blank screens.
+- Admin shell now has PWA manifest, icon, and service-worker shell caching for installable access.
 
 ## Deployment Work Completed
 
@@ -285,11 +288,11 @@ The system is now a strong Phase 1 pilot, but it is not yet a finished commercia
 Recommended next build priorities:
 
 1. Add full user and role management screens.
-2. Add create/edit workflows for teachers, subjects, exams, assessments, inventory, payroll profiles, and announcements.
-3. Add printable receipts, invoices, report cards, and payslips.
-4. Add stronger dashboard charts and school leadership reports.
-5. Add file upload storage for student photos and documents.
-6. Add audit-friendly approval detail screens.
-7. Add end-to-end browser tests as committed test scripts.
-8. Add production security hardening before using real school data.
-
+2. Build dedicated Teacher Workspace and Bursar Workspace dashboards rather than only filtering the shared admin shell.
+3. Add create/edit workflows for teachers, subjects, exams, assessments, inventory, payroll profiles, and announcements.
+4. Add printable receipts, invoices, report cards, and payslips.
+5. Add stronger dashboard charts and school leadership reports.
+6. Add file upload storage for student photos and documents.
+7. Add audit-friendly approval detail screens.
+8. Add end-to-end browser tests as committed test scripts.
+9. Add production security hardening before using real school data.
