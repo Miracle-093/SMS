@@ -102,6 +102,8 @@ npm.cmd run build
 
 ## Demo Login
 
+- Admin/Teacher web app: `https://aethina-sms-admin.vercel.app`
+- Student/Parent portal: `https://aethina-sms-portal.vercel.app`
 - Admin: `admin@aethina.test` / `AdminPass123`
 - Bursar: `bursar@aethina.test` / `BursarPass123`
 - Teacher: `grace.otieno@aethina.test` / `TeacherPass123`

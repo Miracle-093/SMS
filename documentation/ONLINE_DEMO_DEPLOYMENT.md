@@ -14,6 +14,7 @@ Portal -> local NestJS API -> local PostgreSQL Docker
 Online demo:
 
 ```text
+Admin/Teacher shell on Vercel -> Vercel API -> Neon PostgreSQL
 Portal on Vercel -> NestJS API on Vercel -> Neon PostgreSQL
 Desktop demo mode -> SQLite -> Vercel API -> Neon PostgreSQL
 ```
@@ -51,15 +52,32 @@ npm.cmd run prisma:seed --workspace apps/api
 
 ## Vercel Projects
 
-Two Vercel projects have been created from this monorepo:
+Three Vercel projects have been created from this monorepo:
 
 - API: `aethina-sms-api`
 - Portal: `aethina-sms-portal`
+- Admin/Teacher shell: `aethina-sms-admin`
 
 Stable production URLs:
 
 - API: `https://aethina-sms-api.vercel.app`
 - Portal: `https://aethina-sms-portal.vercel.app`
+- Admin/Teacher: `https://aethina-sms-admin.vercel.app`
+
+### Admin/Teacher Project
+
+- Project: `aethina-sms-admin`
+- Root Directory: repository root
+- Framework Preset: Vite
+- Build Command: `npm run build --workspace packages/shared-types && npm run build --workspace packages/validation && npm run build --workspace apps/desktop`
+- Output Directory: `apps/desktop/dist`
+- Config file: `vercel.admin.json`
+
+Environment variables:
+
+- `VITE_API_URL`
+
+Set `VITE_API_URL` to `https://aethina-sms-api.vercel.app`.
 
 ### Portal Project
 
@@ -98,7 +116,7 @@ Recommended values:
 ```text
 NODE_ENV=production
 SYNC_BATCH_SIZE=100
-CORS_ORIGINS=https://aethina-sms-portal.vercel.app
+CORS_ORIGINS=https://aethina-sms-portal.vercel.app,https://aethina-sms-admin.vercel.app
 PORTAL_URL=https://aethina-sms-portal.vercel.app
 ```
 
@@ -123,7 +141,7 @@ Expected:
 
 ## SPA Refresh Support
 
-`apps/portal/vercel.json` rewrites all routes to `index.html`, so the following URLs should open without a Vercel 404:
+`vercel.portal.json` and `vercel.admin.json` rewrite all routes to `index.html`, so SPA routes should open without a Vercel 404. Portal routes include:
 
 - `/`
 - `/login`
@@ -169,7 +187,8 @@ Production deployment is complete.
 
 - API deployment: ready, `GET /health` returns `status: ok` and `database: ok`.
 - Portal deployment: ready, root page returns HTTP 200.
-- Portal-to-API CORS preflight: HTTP 204 with `Access-Control-Allow-Origin: https://aethina-sms-portal.vercel.app`.
+- Admin/Teacher deployment: ready, root page returns HTTP 200.
+- Admin-to-API CORS preflight: HTTP 204 with `Access-Control-Allow-Origin: https://aethina-sms-admin.vercel.app`.
 - Production admin login and portal login were verified against the hosted API.
 
 Deployment-specific fixes:
@@ -186,6 +205,7 @@ npm.cmd run test
 npm.cmd run build
 npm.cmd run build:vercel:api
 npm.cmd run build:vercel:portal
+npm.cmd run build --workspace apps/desktop
 npx.cmd prisma validate --schema apps/api/prisma/schema.prisma
 npx.cmd prisma migrate status --schema apps/api/prisma/schema.prisma
 cargo check

@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm run build --workspace packages/shared-types && npm run build --workspace packages/validation && npm run build --workspace apps/desktop",
+  "outputDirectory": "apps/desktop/dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

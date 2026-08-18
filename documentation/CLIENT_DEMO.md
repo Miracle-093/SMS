@@ -33,6 +33,7 @@ Typical URLs:
 
 ## Online Demo URLs
 
+- Admin/Teacher URL: `https://aethina-sms-admin.vercel.app`
 - Portal URL: `https://aethina-sms-portal.vercel.app`
 - API URL: `https://aethina-sms-api.vercel.app`
 - Neon project: `sweet-credit-41934386`
@@ -80,7 +81,7 @@ Do not expose these services on Public networks for the demo.
 11. Open Payroll and show the submitted payroll run.
 12. Open Notifications and announcements.
 13. Open the Student/Parent Portal on a phone at `http://<PC-LAN-IP>:5174`.
-14. Log in with `adm-001` / `StudentPass123`.
+14. Log in with `sat-s1-001` / `StudentPass123`.
 15. Show portal home, fees, academics, report card, timetable, announcements, and notifications.
 
 ## Offline Demo

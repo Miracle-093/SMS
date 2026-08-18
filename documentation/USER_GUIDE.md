@@ -2,6 +2,7 @@
 
 Live demo:
 
+- Admin/Teacher: `https://aethina-sms-admin.vercel.app`
 - Portal: `https://aethina-sms-portal.vercel.app`
 - API: `https://aethina-sms-api.vercel.app`
 
@@ -15,13 +16,14 @@ Live demo:
 
 ## Administrator
 
-1. Sign in to the desktop/admin app.
-2. Open `Dashboard` to review students, teachers, fees, approvals, risk alerts, low stock, payroll, and sync status.
-3. Open `School Setup` to review Senior One/Senior Two classes, streams, subjects, terms, and Uganda grade boundaries.
-4. Open `Students` to view learners, guardians, admission numbers, and portal credentials.
-5. Use `Reset Portal` when a student or guardian needs a new temporary portal password.
-6. Open `Approvals` to approve or reject budget, expense, payroll, and payment-reversal requests.
-7. Open `Audit` to inspect sensitive administrative activity.
+1. Open `https://aethina-sms-admin.vercel.app`.
+2. Sign in to the admin app.
+3. Open `Dashboard` to review students, teachers, fees, approvals, risk alerts, low stock, payroll, and sync status.
+4. Open `School Setup` to review Senior One/Senior Two classes, streams, subjects, terms, and Uganda grade boundaries.
+5. Open `Students` to view learners, guardians, admission numbers, and portal credentials.
+6. Use `Reset Portal` when a student or guardian needs a new temporary portal password.
+7. Open `Approvals` to approve or reject budget, expense, payroll, and payment-reversal requests.
+8. Open `Audit` to inspect sensitive administrative activity.
 
 ## Finance
 
