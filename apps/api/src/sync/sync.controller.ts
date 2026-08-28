@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, HttpCode, Inject, Param, Post, UseGuards } from "@nestjs/common";
 import { CurrentUser, PermissionKey } from "@aethina/shared-types";
 import { syncPullSchema, syncPushSchema } from "@aethina/validation";
 import { AuthGuard } from "../common/auth.guard.js";
@@ -12,18 +12,27 @@ export class SyncController {
   constructor(@Inject(SyncService) private readonly syncService: SyncService) {}
 
   @Post("push")
-  push(@Body() body: unknown) {
-    return this.syncService.push(syncPushSchema.parse(body));
+  @UseGuards(AuthGuard)
+  push(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
+    this.assertStaffSyncUser(user);
+    const input = syncPushSchema.parse(body);
+    return this.syncService.push(user, { ...input, schoolId: user.schoolId });
   }
 
   @Post("pull")
-  pull(@Body() body: unknown) {
-    return this.syncService.pull(syncPullSchema.parse(body));
+  @HttpCode(200)
+  @UseGuards(AuthGuard)
+  pull(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
+    this.assertStaffSyncUser(user);
+    const input = syncPullSchema.parse(body);
+    return this.syncService.pull(user, { ...input, schoolId: user.schoolId });
   }
 
   @Post("retry")
-  retry(@Body() body: { deviceId: string; schoolId: string }) {
-    return this.syncService.retryFailed(body.schoolId, body.deviceId);
+  @UseGuards(AuthGuard)
+  retry(@CurrentUserParam() user: CurrentUser, @Body() body: { deviceId: string; schoolId?: string }) {
+    this.assertStaffSyncUser(user);
+    return this.syncService.retryFailed(user, body.deviceId);
   }
 
   @Get("conflicts")
@@ -45,5 +54,11 @@ export class SyncController {
   @RequirePermissions(PermissionKey.SyncReview)
   rejectConflict(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {
     return this.syncService.rejectConflict(user, id);
+  }
+
+  private assertStaffSyncUser(user: CurrentUser) {
+    if (user.roles.includes("PORTAL_USER")) {
+      throw new ForbiddenException("Portal users cannot synchronize staff data.");
+    }
   }
 }

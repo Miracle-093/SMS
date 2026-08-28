@@ -13,7 +13,8 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "db:reset:dev": "tsx scripts/reset-dev-db.ts",
     "offline:test": "vitest run test/offline-sync.test.ts",
-    "offline:smoke": "tsx scripts/offline-smoke.ts"
+    "offline:smoke": "tsx scripts/offline-smoke.ts",
+    "acceptance:phase1": "tsx scripts/phase1-acceptance-execution.ts"
   },
   "dependencies": {
     "@aethina/shared-types": "0.1.0",

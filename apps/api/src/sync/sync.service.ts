@@ -1,5 +1,5 @@
-import { Inject, Injectable } from "@nestjs/common";
-import { ConflictSensitivity, CurrentUser, SyncEntityType, SyncStatus } from "@aethina/shared-types";
+import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { ConflictSensitivity, CurrentUser, PermissionKey, SyncEntityType, SyncStatus, UserRole } from "@aethina/shared-types";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { StudentsService } from "../students/students.service.js";
@@ -36,7 +36,7 @@ export class SyncService {
     @Inject(FinanceService) private readonly finance: FinanceService
   ) {}
 
-  async push(input: {
+  async push(user: CurrentUser, input: {
     deviceId: string;
     schoolId: string;
     changes: Array<{
@@ -53,8 +53,12 @@ export class SyncService {
     const results = [];
 
     for (const change of input.changes) {
+      this.assertSyncAccess(user, change.entityType, change.operation);
       const existingRecord = await this.prisma.synchronizationRecord.findUnique({ where: { id: change.id } });
       if (existingRecord) {
+        if (existingRecord.schoolId !== input.schoolId || existingRecord.deviceId !== input.deviceId) {
+          throw new ForbiddenException("Synchronization record does not belong to this school or device.");
+        }
         results.push({
           id: existingRecord.id,
           entityType: existingRecord.entityType,
@@ -85,18 +89,18 @@ export class SyncService {
     return { accepted: results.filter((result) => result.status === SyncStatus.Synced).length, results };
   }
 
-  async pull(input: { deviceId: string; schoolId: string; since: string | null }) {
+  async pull(user: CurrentUser, input: { deviceId: string; schoolId: string; since: string | null }) {
     const since = input.since ? new Date(input.since) : new Date(0);
     const [students, guardians, teacherAttendance, payments, inventoryItems, stockMovements, payrollRecords, budgetRequests, marks] = await Promise.all([
-      this.prisma.student.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }),
-      this.prisma.guardian.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }),
-      this.prisma.teacherAttendance.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }),
-      this.prisma.payment.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }),
-      this.prisma.inventoryItem.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }),
-      this.prisma.stockMovement.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }),
-      this.prisma.payrollRecord.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }),
-      this.prisma.budgetRequest.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }),
-      this.prisma.mark.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } })
+      this.canSync(user, SyncEntityType.Student, "READ") ? this.prisma.student.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }) : [],
+      this.canSync(user, SyncEntityType.Guardian, "READ") ? this.prisma.guardian.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }) : [],
+      this.canSync(user, SyncEntityType.TeacherAttendance, "READ") ? this.prisma.teacherAttendance.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }) : [],
+      this.canSync(user, SyncEntityType.Payment, "READ") ? this.prisma.payment.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }) : [],
+      this.canSync(user, SyncEntityType.InventoryItem, "READ") ? this.prisma.inventoryItem.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }) : [],
+      this.canSync(user, SyncEntityType.StockMovement, "READ") ? this.prisma.stockMovement.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }) : [],
+      this.canSync(user, SyncEntityType.PayrollRecord, "READ") ? this.prisma.payrollRecord.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }) : [],
+      this.canSync(user, SyncEntityType.BudgetRequest, "READ") ? this.prisma.budgetRequest.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }) : [],
+      this.canSync(user, SyncEntityType.AssessmentMark, "READ") ? this.prisma.mark.findMany({ where: { schoolId: input.schoolId, updatedAt: { gt: since } } }) : []
     ]);
 
     return {
@@ -105,9 +109,10 @@ export class SyncService {
     };
   }
 
-  async retryFailed(schoolId: string, deviceId: string) {
+  async retryFailed(user: CurrentUser, deviceId: string) {
+    if (!this.isSyncAdmin(user)) throw new ForbiddenException("Only sync reviewers can retry failed synchronization records.");
     const failed = await this.prisma.synchronizationRecord.findMany({
-      where: { schoolId, deviceId, status: SyncStatus.Failed },
+      where: { schoolId: user.schoolId, deviceId, status: SyncStatus.Failed },
       orderBy: { createdAt: "asc" },
       take: 100
     });
@@ -117,6 +122,51 @@ export class SyncService {
       results.push(await this.applyChange(record));
     }
     return { retried: results.length, results };
+  }
+
+  private assertSyncAccess(user: CurrentUser, entityType: string, operation: "CREATE" | "UPDATE" | "DELETE" | "READ") {
+    if (!this.canSync(user, entityType, operation)) {
+      throw new ForbiddenException(`User is not allowed to synchronize ${entityType}.`);
+    }
+  }
+
+  private canSync(user: CurrentUser, entityType: string, operation: "CREATE" | "UPDATE" | "DELETE" | "READ") {
+    if (!modelByEntityType[entityType]) return false;
+    if (this.isSyncAdmin(user)) return true;
+    const permissions = new Set(user.permissions);
+    const isRead = operation === "READ";
+
+    switch (entityType) {
+      case SyncEntityType.Student:
+      case SyncEntityType.Guardian:
+        return hasAny(permissions, isRead ? [PermissionKey.StudentsRead, PermissionKey.StudentsManage, PermissionKey.AdmissionsManage] : [PermissionKey.StudentsManage, PermissionKey.AdmissionsManage]);
+      case SyncEntityType.TeacherAttendance:
+        return permissions.has(PermissionKey.AttendanceManage);
+      case SyncEntityType.Payment:
+      case SyncEntityType.Expense:
+      case SyncEntityType.PaymentReversal:
+        return hasAny(permissions, isRead ? [PermissionKey.FinanceRead, PermissionKey.FinanceManage] : [PermissionKey.FinanceManage]);
+      case SyncEntityType.BudgetRequest:
+        return hasAny(permissions, isRead ? [PermissionKey.FinanceRead, PermissionKey.BudgetManage] : [PermissionKey.BudgetManage]);
+      case SyncEntityType.InventoryItem:
+      case SyncEntityType.StockMovement:
+        return permissions.has(PermissionKey.InventoryManage);
+      case SyncEntityType.PayrollRecord:
+        return hasAny(permissions, isRead ? [PermissionKey.PayrollRead, PermissionKey.PayrollManage] : [PermissionKey.PayrollManage]);
+      case SyncEntityType.AssessmentMark:
+        return hasAny(permissions, isRead ? [PermissionKey.AcademicsRead, PermissionKey.AcademicsManage, PermissionKey.MarksEntry, PermissionKey.MarksReview] : [PermissionKey.MarksEntry, PermissionKey.AcademicsManage]);
+      default:
+        return false;
+    }
+  }
+
+  private isSyncAdmin(user: CurrentUser) {
+    const roles = new Set(user.roles);
+    return user.permissions.includes(PermissionKey.SyncReview)
+      || roles.has(UserRole.SuperAdministrator)
+      || roles.has(UserRole.Administrator)
+      || roles.has(UserRole.SchoolAdministrator)
+      || roles.has("ADMIN");
   }
 
   async conflicts(schoolId: string) {
@@ -189,6 +239,9 @@ export class SyncService {
     const model = this.prisma[modelName] as any;
     const server = await model.findUnique({ where: { id: record.entityId } });
     const payload = record.payload as Record<string, unknown>;
+    if (server?.schoolId && server.schoolId !== record.schoolId) {
+      return this.fail(record.id, "Synchronized entity does not belong to this school.");
+    }
 
     if (server && record.baseVersion !== null && server.version !== record.baseVersion) {
       const sensitivity = sensitiveEntities.has(record.entityType) ? ConflictSensitivity.Sensitive : ConflictSensitivity.Normal;
@@ -271,4 +324,8 @@ export class SyncService {
       mustChangePassword: false
     };
   }
+}
+
+function hasAny(permissions: Set<string>, keys: PermissionKey[]) {
+  return keys.some((key) => permissions.has(key));
 }

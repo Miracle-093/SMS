@@ -97,6 +97,10 @@ export class AttendanceService {
   }
 
   async requestCorrection(id: string, input: { requestedBy: string; reason: string; requestedCheckInAt?: string; requestedCheckOutAt?: string }) {
+    const attendance = await this.prisma.teacherAttendance.findUniqueOrThrow({ where: { id } });
+    if (attendance.teacherId !== input.requestedBy || attendance.deletedAt) {
+      throw new BadRequestException("Correction request does not match this teacher attendance record.");
+    }
     return this.prisma.teacherAttendance.update({
       where: { id },
       data: {

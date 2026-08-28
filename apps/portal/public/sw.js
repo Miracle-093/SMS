@@ -1,4 +1,4 @@
-const CACHE_NAME = "satelite-portal-shell-v1";
+const CACHE_NAME = "satelite-portal-shell-v2";
 const SHELL_ASSETS = ["/", "/manifest.webmanifest", "/aethina-icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -17,5 +17,19 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   if (new URL(request.url).pathname.startsWith("/portal/")) return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith("/assets/")) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(request);
+        if (cached) return cached;
+        const response = await fetch(request);
+        cache.put(request, response.clone());
+        return response;
+      })
+    );
+    return;
+  }
   event.respondWith(fetch(request).catch(() => caches.match(request).then((cached) => cached || caches.match("/"))));
 });

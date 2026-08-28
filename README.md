@@ -116,7 +116,7 @@ npm.cmd run build
 
 The pilot dataset is Satelite Secondary School, a fictional Ugandan high school with Senior One/Senior Two classes, Uganda D1-F9 grade boundaries, teachers, guardians, fees, payments, reports, inventory, payroll, and approvals.
 
-For the presentation runbook, phone access, firewall notes, demo flow, and recovery steps, see `documentation/CLIENT_DEMO.md`. For a user walkthrough, see `documentation/USER_GUIDE.md`.
+For the presentation runbook, phone access, firewall notes, demo flow, and recovery steps, see `documentation/CLIENT_DEMO.md`. For the Phase One role acceptance checklist, see `documentation/PHASE1_ACCEPTANCE_MATRIX.md`. For a user walkthrough, see `documentation/USER_GUIDE.md`.
 
 Useful commands:
 

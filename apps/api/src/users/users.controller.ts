@@ -17,6 +17,18 @@ export class UsersController {
     return this.usersService.list(user.schoolId);
   }
 
+  @Get("roles")
+  @RequirePermissions(PermissionKey.UsersManage)
+  roles(@CurrentUserParam() user: CurrentUser) {
+    return this.usersService.roles(user.schoolId);
+  }
+
+  @Post()
+  @RequirePermissions(PermissionKey.UsersManage)
+  create(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
+    return this.usersService.create(user, body);
+  }
+
   @Post(":id/activate")
   @RequirePermissions(PermissionKey.UsersManage)
   activate(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {
@@ -33,5 +45,11 @@ export class UsersController {
   @RequirePermissions(PermissionKey.UsersManage)
   resetPassword(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
     return this.usersService.resetPassword(user, body);
+  }
+
+  @Post(":id/roles")
+  @RequirePermissions(PermissionKey.UsersManage)
+  assignRoles(@CurrentUserParam() user: CurrentUser, @Param("id") id: string, @Body() body: unknown) {
+    return this.usersService.assignRoles(user, id, body);
   }
 }

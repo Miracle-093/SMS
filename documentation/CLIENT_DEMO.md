@@ -68,6 +68,8 @@ Do not expose these services on Public networks for the demo.
 
 ## Recommended Demo Flow
 
+Use `documentation/PHASE1_ACCEPTANCE_MATRIX.md` as the role-by-role acceptance checklist.
+
 1. Log in as admin.
 2. Show Dashboard: students, fees, approvals, low stock, payroll, risk, sync.
 3. Open Students and register a new student.

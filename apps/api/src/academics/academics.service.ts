@@ -95,6 +95,22 @@ export class AcademicsService {
     if (!assessment) throw new NotFoundException("Assessment not found.");
     await this.assertTeacherCanEnterMarks(actor, assessment);
     const maxScore = money(assessment.maxScore);
+    const submittedStudentIds = input.entries.map((entry) => entry.studentId);
+    if (new Set(submittedStudentIds).size !== submittedStudentIds.length) throw new BadRequestException("Marks entry contains duplicate students.");
+    const eligibleStudents = await this.prisma.student.findMany({
+      where: {
+        id: { in: submittedStudentIds },
+        schoolId: actor.schoolId,
+        deletedAt: null,
+        status: "ACTIVE",
+        currentClassId: assessment.classId ?? undefined,
+        currentStreamId: assessment.streamId ?? undefined
+      },
+      select: { id: true }
+    });
+    const eligibleStudentIds = new Set(eligibleStudents.map((student) => student.id));
+    const missingStudentIds = submittedStudentIds.filter((studentId) => !eligibleStudentIds.has(studentId));
+    if (missingStudentIds.length) throw new BadRequestException("Marks can only be entered for active students in the assessment class and stream.");
     const now = new Date();
     const status = input.status === "SUBMITTED" ? "SUBMITTED" : "DRAFT";
     const marks = await this.prisma.$transaction(async (tx) => {

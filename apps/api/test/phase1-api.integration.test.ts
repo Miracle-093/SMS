@@ -288,6 +288,27 @@ describe("Phase 1 core integration", () => {
     expect(staffOnly.status).toBe(403);
   }, 60_000);
 
+  it("requires staff authentication for offline sync and ignores forged school ids", async () => {
+    const forgedSchoolId = "00000000-0000-4000-8000-999999999999";
+    const deviceId = "00000000-0000-4000-8000-000000000001";
+    const unauthenticated = await rawPost("/sync/pull", { deviceId, schoolId: forgedSchoolId, since: null });
+    expect(unauthenticated.status).toBe(403);
+
+    const portalLogin = await post("/auth/portal-login", {
+      username: "sat-s1-001",
+      password: "StudentPass123",
+      deviceId
+    });
+    const portalSync = await rawPost("/sync/pull", { deviceId, schoolId, since: null }, portalLogin.accessToken);
+    expect(portalSync.status).toBe(403);
+
+    const staffSync = await rawPost("/sync/pull", { deviceId, schoolId: forgedSchoolId, since: null }, token);
+    expect(staffSync.status).toBe(200);
+    const body = await staffSync.json();
+    expect(body.records.students.length).toBeGreaterThan(0);
+    expect(body.records.students.every((student: { schoolId: string }) => student.schoolId === schoolId)).toBe(true);
+  }, 60_000);
+
   it("exposes a lightweight health endpoint", async () => {
     const response = await rawGet("/health");
     expect(response.status).toBe(200);

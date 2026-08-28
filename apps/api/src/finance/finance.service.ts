@@ -173,6 +173,13 @@ export class FinanceService {
 
   async createManualInvoice(actor: CurrentUser, body: unknown) {
     const input = manualInvoiceSchema.parse(body);
+    const [student, term, fee] = await Promise.all([
+      this.prisma.student.findFirst({ where: { id: input.studentId, schoolId: actor.schoolId, deletedAt: null } }),
+      this.prisma.term.findFirst({ where: { id: input.termId, academicYear: { schoolId: actor.schoolId } } }),
+      this.prisma.feeStructure.findFirst({ where: { id: input.feeStructureId, schoolId: actor.schoolId, isActive: true } })
+    ]);
+    if (!student || !term || !fee) throw new BadRequestException("Invoice student, term, and fee structure must belong to this school.");
+    if (fee.classId !== student.currentClassId) throw new BadRequestException("Fee structure does not match the student's current class.");
     const total = input.lines.reduce((sum, line) => sum + line.amount, 0);
     const invoiceNo = await this.nextNumber(actor.schoolId, "INV", "studentInvoice", "invoiceNo");
     const invoice = await this.prisma.$transaction(async (tx) => {
@@ -261,6 +268,8 @@ export class FinanceService {
   }
 
   async reprintReceipt(actor: CurrentUser, id: string) {
+    const existing = await this.prisma.receipt.findFirst({ where: { id, schoolId: actor.schoolId } });
+    if (!existing) throw new NotFoundException("Receipt not found.");
     const receipt = await this.prisma.receipt.update({ where: { id }, data: { reprintCount: { increment: 1 }, printedAt: new Date() } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "RECEIPT_REPRINTED", entityType: "RECEIPT", entityId: id });
     return receipt;
@@ -316,6 +325,10 @@ export class FinanceService {
     const settings = await this.settings(actor.schoolId);
     const requiresApproval = input.amount >= money(settings.feeWaiverApprovalThreshold);
     const adjustment = await this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.studentInvoice.findFirst({ where: { id: input.invoiceId, schoolId: actor.schoolId, studentId: input.studentId, deletedAt: null } });
+      if (!invoice) throw new NotFoundException("Invoice not found for this student.");
+      if (invoice.status === InvoiceStatus.Cancelled) throw new BadRequestException("Cancelled invoices cannot receive adjustments.");
+      if (input.amount > money(invoice.balance)) throw new BadRequestException("Adjustment exceeds outstanding invoice balance.");
       const row = await tx.feeAdjustment.create({
         data: {
           schoolId: actor.schoolId,
@@ -336,7 +349,7 @@ export class FinanceService {
       if (requiresApproval) {
         await tx.approvalWorkflow.create({ data: { schoolId: actor.schoolId, entityType: "FEE_ADJUSTMENT", entityId: row.id, requestedBy: actor.id, status: "SUBMITTED" } });
       } else {
-        await this.applyAdjustment(tx, input.invoiceId, input.amount);
+        await this.applyAdjustment(tx, actor.schoolId, input.invoiceId, input.amount);
       }
       if (input.amount >= money(settings.feeWaiverApprovalThreshold)) {
         await tx.riskAlert.create({ data: { schoolId: actor.schoolId, category: "EXCESSIVE_WAIVER", severity: "HIGH", entityType: "FEE_ADJUSTMENT", entityId: row.id, amount: input.amount, userId: actor.id, reason: "Large discount or waiver reached approval/risk threshold." } });
@@ -355,6 +368,11 @@ export class FinanceService {
     const input = budgetSchema.parse(body);
     const settings = await this.settings(actor.schoolId);
     if (input.amount > money(settings.maximumDepartmentBudget)) throw new BadRequestException("Budget exceeds configured department maximum.");
+    if (input.academicYearId) {
+      const year = await this.prisma.academicYear.findFirst({ where: { id: input.academicYearId, schoolId: actor.schoolId } });
+      if (!year) throw new BadRequestException("Academic year must belong to this school.");
+    }
+    if (input.termId) await this.assertTerm(actor.schoolId, input.termId);
     const budget = await this.prisma.budget.create({ data: { schoolId: actor.schoolId, createdBy: actor.id, ...input, academicYearId: input.academicYearId ?? null, termId: input.termId ?? null, period: input.period ?? null } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "BUDGET_CREATED", entityType: "BUDGET", entityId: budget.id, newValue: budget });
     return budget;
@@ -391,6 +409,11 @@ export class FinanceService {
         if (duplicate) throw new ConflictException("Expense reference already exists.");
       }
       const budget = input.budgetId ? await tx.budget.findFirst({ where: { id: input.budgetId, schoolId: actor.schoolId, deletedAt: null } }) : null;
+      if (input.budgetId && !budget) throw new NotFoundException("Budget not found.");
+      if (input.requestedBy) {
+        const requester = await tx.user.findFirst({ where: { id: input.requestedBy, schoolId: actor.schoolId, isActive: true } });
+        if (!requester) throw new BadRequestException("Expense requester must belong to this school.");
+      }
       if (budget && input.amount > money(budget.amount) - money(budget.spentAmount) && budget.hardCap) {
         await tx.riskAlert.create({ data: { schoolId: actor.schoolId, category: "BUDGET_VIOLATION", severity: "HIGH", entityType: "BUDGET", entityId: budget.id, amount: input.amount, userId: actor.id, reason: "Expense exceeds remaining budget." } });
         throw new BadRequestException("Expense exceeds remaining budget.");
@@ -479,8 +502,8 @@ export class FinanceService {
     throw new NotFoundException("Report type not found.");
   }
 
-  private async applyAdjustment(tx: Tx, invoiceId: string, amount: number) {
-    const invoice = await tx.studentInvoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  private async applyAdjustment(tx: Tx, schoolId: string, invoiceId: string, amount: number) {
+    const invoice = await tx.studentInvoice.findFirstOrThrow({ where: { id: invoiceId, schoolId } });
     const newAdjustment = money(invoice.adjustmentTotal) + amount;
     const newBalance = Math.max(money(invoice.balance) - amount, 0);
     await tx.studentInvoice.update({ where: { id: invoiceId }, data: { adjustmentTotal: newAdjustment, balance: newBalance, status: newBalance === 0 ? InvoiceStatus.Paid : invoice.status, version: { increment: 1 } } });
@@ -490,6 +513,10 @@ export class FinanceService {
     if (termId) return termId;
     const school = await this.prisma.school.findUnique({ where: { id: schoolId } });
     return school?.currentTermId ?? undefined;
+  }
+
+  private async assertTerm(schoolId: string, termId: string) {
+    return this.prisma.term.findFirstOrThrow({ where: { id: termId, academicYear: { schoolId } } });
   }
 
   private dateRange(query: Record<string, string | undefined>) {

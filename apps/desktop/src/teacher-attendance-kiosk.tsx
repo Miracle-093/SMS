@@ -40,7 +40,7 @@ export function TeacherAttendanceKiosk() {
       setLastRecord(attendance);
       setMessage(`${action === "check-in" ? "Check-in" : "Check-out"} recorded.`);
     } catch (error) {
-      setMessage(`Offline or failed: ${error instanceof Error ? error.message : "Unknown error"}. The SQLite queue can retry this change.`);
+      setMessage(`Attendance was not recorded: ${error instanceof Error ? error.message : "API unavailable"}. Try again when the connection is available.`);
     } finally {
       setBusy(false);
     }
@@ -56,23 +56,27 @@ export function TeacherAttendanceKiosk() {
       return;
     }
     setBusy(true);
-    const response = await fetch(`${apiBaseUrl}/teacher-attendance/${lastRecord.id}/correction-request`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requestedBy: lastRecord.teacherId,
-        reason: correctionReason.trim(),
-        requestedCheckInAt: requestedCheckInAt ? new Date(requestedCheckInAt).toISOString() : null,
-        requestedCheckOutAt: requestedCheckOutAt ? new Date(requestedCheckOutAt).toISOString() : null
-      })
-    });
-    if (!response.ok) {
-      setMessage(await response.text());
+    try {
+      const response = await fetch(`${apiBaseUrl}/teacher-attendance/${lastRecord.id}/correction-request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestedBy: lastRecord.teacherId,
+          reason: correctionReason.trim(),
+          requestedCheckInAt: requestedCheckInAt ? new Date(requestedCheckInAt).toISOString() : null,
+          requestedCheckOutAt: requestedCheckOutAt ? new Date(requestedCheckOutAt).toISOString() : null
+        })
+      });
+      if (!response.ok) {
+        setMessage(await response.text());
+        return;
+      }
+      setMessage("Correction request submitted for administrator review.");
+    } catch (error) {
+      setMessage(`Correction request failed: ${error instanceof Error ? error.message : "API unavailable"}.`);
+    } finally {
       setBusy(false);
-      return;
     }
-    setMessage("Correction request submitted for administrator review.");
-    setBusy(false);
   }
 
   return (
@@ -110,7 +114,7 @@ export function TeacherAttendanceKiosk() {
             <button className="ghost" type="button" disabled={busy} onClick={() => void requestCorrection()}>Request Correction</button>
           </div>
         )}
-        <p>{message}</p>
+        <p role="status" aria-live="polite" aria-atomic="true">{message}</p>
       </section>
     </div>
   );

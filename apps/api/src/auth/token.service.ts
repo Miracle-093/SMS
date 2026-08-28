@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { Inject, Injectable, InternalServerErrorException, UnauthorizedException } from "@nestjs/common";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { ConfigService } from "@nestjs/config";
 import type { CurrentUser } from "@aethina/shared-types";
@@ -36,7 +36,10 @@ export class TokenService {
   }
 
   private signature(value: string): string {
-    const secret = this.config.get<string>("JWT_SECRET") ?? "development-only";
+    const secret = this.config.get<string>("JWT_SECRET");
+    if (!secret) {
+      throw new InternalServerErrorException("JWT_SECRET is not configured.");
+    }
     return createHmac("sha256", secret).update(value).digest("base64url");
   }
 }

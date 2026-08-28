@@ -18,6 +18,11 @@ type PortalHome = {
 };
 
 const primaryViews = ["home", "academics", "finance", "timetable", "more"] as const;
+const loadableViews = ["home", "academics", "finance", "timetable", "announcements", "notifications"] as const;
+
+type LoadableView = (typeof loadableViews)[number];
+type StudentIdentity = PortalHome["student"];
+type TableColumn<T> = { heading: string; render: (row: T) => React.ReactNode; align?: "right" };
 
 function PortalApp() {
   const [session, setSession] = useState<Session | null>(() => readJson("aethina.portal.session", null));
@@ -31,6 +36,7 @@ function PortalApp() {
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [error, setError] = useState("");
+  const [viewErrors, setViewErrors] = useState<Partial<Record<LoadableView, string>>>({});
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -63,8 +69,11 @@ function PortalApp() {
   }
 
   async function refresh(token: string, view: string) {
+    setLoading(true);
     setError("");
     try {
+      const loadableView = loadableViews.includes(view as LoadableView) ? view as LoadableView : null;
+      if (loadableView) setViewErrors((current) => ({ ...current, [loadableView]: "" }));
       if (view === "home") {
         setHome(await api<PortalHome>("/portal/home", token));
         setNotifications(await api<any[]>("/portal/notifications", token));
@@ -75,7 +84,12 @@ function PortalApp() {
       if (view === "announcements") setAnnouncements(await api<any[]>("/portal/announcements", token));
       if (view === "notifications") setNotifications(await api<any[]>("/portal/notifications", token));
     } catch (err) {
-      setError(readableError(err));
+      const message = readableError(err);
+      setError(message);
+      const loadableView = loadableViews.includes(view as LoadableView) ? view as LoadableView : null;
+      if (loadableView) setViewErrors((current) => ({ ...current, [loadableView]: message }));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -83,6 +97,7 @@ function PortalApp() {
     localStorage.removeItem("aethina.portal.session");
     setSession(null);
     setHome(null);
+    setViewErrors({});
   }
 
   if (!session) {
@@ -95,12 +110,16 @@ function PortalApp() {
           <div className="demo-strip">Demo: sat-s1-001 / StudentPass123</div>
           <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
           <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
-          {error && <p className="error">{error}</p>}
-          <button disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button>
+          {error && <p className="error" role="alert">{error}</p>}
+          <button disabled={loading} aria-busy={loading}>{loading ? "Signing in..." : "Sign in"}</button>
         </form>
       </main>
     );
   }
+
+  const studentIdentity = home?.student;
+  const activeLoadableView = loadableViews.includes(active as LoadableView) ? active as LoadableView : null;
+  const activeError = activeLoadableView ? viewErrors[activeLoadableView] : "";
 
   return (
     <main className="portal">
@@ -113,25 +132,25 @@ function PortalApp() {
         <p>Secondary School</p>
         <strong>{session.user.displayName}</strong>
         {["home", "academics", "finance", "timetable", "announcements", "notifications"].map((view) => (
-          <button key={view} className={active === view ? "active" : ""} onClick={() => setActive(view)}>
+          <button key={view} className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => setActive(view)}>
             {view === "notifications" && unread ? `Notifications (${unread})` : title(view)}
           </button>
         ))}
         <button onClick={logout}>Sign out</button>
       </aside>
-      <section className="content">
-        {error && <p className="error">{error}</p>}
-        {active === "home" && <HomeView home={home} />}
-        {active === "academics" && <AcademicsView data={academics} />}
-        {active === "finance" && <FinanceView data={finance} />}
-        {active === "timetable" && <TimetableView rows={timetable.length ? timetable : home?.timetable ?? []} />}
-        {active === "announcements" && <ListView title="Announcements" rows={announcements.length ? announcements : home?.announcements ?? []} />}
-        {active === "notifications" && <ListView title="Notifications" rows={notifications.length ? notifications : home?.notifications ?? []} />}
+      <section className="content" aria-busy={loading}>
+        {activeError && <p className="error" role="alert">{activeError}</p>}
+        {active === "home" && (viewErrors.home && !loading && !home ? <LoadFailed title="Dashboard unavailable" onRetry={() => void refresh(session.accessToken, "home")} /> : <HomeView home={home} />)}
+        {active === "academics" && (viewErrors.academics && !loading && !academics ? <LoadFailed title="Academics unavailable" onRetry={() => void refresh(session.accessToken, "academics")} /> : <AcademicsView data={academics} student={studentIdentity} />)}
+        {active === "finance" && (viewErrors.finance && !loading && !finance ? <LoadFailed title="Finance unavailable" onRetry={() => void refresh(session.accessToken, "finance")} /> : <FinanceView data={finance} student={studentIdentity} />)}
+        {active === "timetable" && (viewErrors.timetable && !loading ? <LoadFailed title="Timetable unavailable" onRetry={() => void refresh(session.accessToken, "timetable")} /> : <TimetableView rows={timetable.length ? timetable : home?.timetable ?? []} />)}
+        {active === "announcements" && (viewErrors.announcements && !loading ? <LoadFailed title="Announcements unavailable" onRetry={() => void refresh(session.accessToken, "announcements")} /> : <ListView title="Announcements" rows={announcements.length ? announcements : home?.announcements ?? []} />)}
+        {active === "notifications" && (viewErrors.notifications && !loading ? <LoadFailed title="Notifications unavailable" onRetry={() => void refresh(session.accessToken, "notifications")} /> : <ListView title="Notifications" rows={notifications.length ? notifications : home?.notifications ?? []} />)}
         {active === "more" && <MoreView setActive={setActive} logout={logout} unread={unread} />}
       </section>
       <nav className="bottom-nav">
         {primaryViews.map((view) => (
-          <button key={view} className={active === view ? "active" : ""} onClick={() => setActive(view)}>
+          <button key={view} className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => setActive(view)}>
             {view === "more" && unread ? `More (${unread})` : title(view)}
           </button>
         ))}
@@ -169,41 +188,61 @@ function HomeView({ home }: { home: PortalHome | null }) {
   );
 }
 
-function AcademicsView({ data }: { data: any }) {
+function AcademicsView({ data, student }: { data: any; student?: StudentIdentity }) {
   const marks = data?.marks ?? [];
   const cards = data?.reportCards ?? [];
   if (!data) return <Skeleton title="Loading academics" />;
   return (
     <>
-      <SectionTitle eyebrow="Uganda grading" title="Academics" helper="Published marks and report cards use D1-F9 grade boundaries." />
-      <div className="table">
-        {marks.length === 0 && <p className="empty">No published marks yet.</p>}
-        {marks.map((mark: any) => <div className="row" key={mark.id}><span>{mark.subject?.name}</span><strong>{mark.score} ({mark.grade ?? "N/A"})</strong></div>)}
-      </div>
+      <SectionTitle eyebrow="Uganda grading" title="Academics" helper="Published marks and report cards use D1-F9 grade boundaries." action={<button type="button" className="ghost no-print" onClick={printPage}>Print</button>} />
+      <PrintHeader title="Academic Results / Report Card" student={student} />
+      <DataTable
+        caption="Published marks"
+        columns={[
+          { heading: "Subject", render: (mark: any) => mark.subject?.name ?? "Subject" },
+          { heading: "Assessment", render: (mark: any) => mark.assessment?.examination?.name ?? mark.assessment?.name ?? "Published mark" },
+          { heading: "Score", align: "right", render: (mark: any) => `${mark.score} (${mark.grade ?? "N/A"})` }
+        ]}
+        empty="No published marks yet."
+        rows={marks}
+      />
       <h3>Report cards</h3>
-      <div className="table">
-        {cards.length === 0 && <p className="empty">No report cards published yet.</p>}
-        {cards.map((card: any) => <div className="row" key={card.id}><span>{new Date(card.generatedAt).toLocaleDateString()}</span><strong>{card.grade} / {Number(card.averageScore).toFixed(0)}</strong></div>)}
-      </div>
+      <DataTable
+        caption="Published report cards"
+        columns={[
+          { heading: "Generated", render: (card: any) => new Date(card.generatedAt).toLocaleDateString() },
+          { heading: "Grade", render: (card: any) => card.grade ?? "N/A" },
+          { heading: "Average", align: "right", render: (card: any) => Number(card.averageScore).toFixed(0) }
+        ]}
+        empty="No report cards published yet."
+        rows={cards}
+      />
     </>
   );
 }
 
-function FinanceView({ data }: { data: any }) {
+function FinanceView({ data, student }: { data: any; student?: StudentIdentity }) {
   if (!data) return <Skeleton title="Loading finance" />;
   const summary = data.summary ?? { expected: 0, paid: 0, balance: 0 };
   return (
     <>
-      <SectionTitle eyebrow="Term billing" title="Finance" helper="Track issued invoices, payments received, and outstanding balances." />
+      <SectionTitle eyebrow="Term billing" title="Finance" helper="Track issued invoices, payments received, and outstanding balances." action={<button type="button" className="ghost no-print" onClick={printPage}>Print</button>} />
+      <PrintHeader title="Student Invoice / Fee Statement" student={student} />
       <section className="stats">
         <Metric label="Expected" value={ugx(summary.expected)} />
         <Metric label="Paid" value={ugx(summary.paid)} />
         <Metric label="Balance" value={ugx(summary.balance)} danger={summary.balance > 0} />
       </section>
-      <div className="table">
-        {(data.invoices ?? []).length === 0 && <p className="empty">No invoices have been issued yet.</p>}
-        {(data.invoices ?? []).map((invoice: any) => <div className="row" key={invoice.id}><span>{invoice.invoiceNo} - {invoice.status}</span><strong>{ugx(invoice.balance)}</strong></div>)}
-      </div>
+      <DataTable
+        caption="Issued invoices"
+        columns={[
+          { heading: "Invoice", render: (invoice: any) => invoice.invoiceNo },
+          { heading: "Status", render: (invoice: any) => title(String(invoice.status ?? "pending").toLowerCase()) },
+          { heading: "Balance", align: "right", render: (invoice: any) => ugx(invoice.balance) }
+        ]}
+        empty="No invoices have been issued yet."
+        rows={data.invoices ?? []}
+      />
     </>
   );
 }
@@ -237,8 +276,46 @@ function ListView({ title, rows }: { title: string; rows: any[] }) {
   );
 }
 
-function SectionTitle({ eyebrow, title, helper }: { eyebrow: string; title: string; helper?: string }) {
-  return <header className="section-title"><p className="eyebrow">{eyebrow}</p><h2>{title}</h2>{helper && <p>{helper}</p>}</header>;
+function DataTable<T extends { id: string }>({ caption, columns, empty, rows }: { caption: string; columns: TableColumn<T>[]; empty: string; rows: T[] }) {
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <caption>{caption}</caption>
+        <thead>
+          <tr>{columns.map((column) => <th key={column.heading} className={column.align === "right" ? "numeric" : undefined}>{column.heading}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td className="empty-cell" colSpan={columns.length}>{empty}</td></tr>
+          ) : rows.map((row) => (
+            <tr key={row.id}>
+              {columns.map((column) => <td key={column.heading} className={column.align === "right" ? "numeric" : undefined}>{column.render(row)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PrintHeader({ title, student }: { title: string; student?: StudentIdentity }) {
+  const className = [student?.currentClass?.name, student?.currentStream?.name].filter(Boolean).join(" ");
+  return (
+    <div className="print-only print-header">
+      <p className="eyebrow">Satelite Secondary School</p>
+      <h2>{title}</h2>
+      <dl>
+        <div><dt>Student</dt><dd>{student ? `${student.firstName} ${student.lastName}` : "Portal student"}</dd></div>
+        <div><dt>Admission no.</dt><dd>{student?.admissionNo ?? "N/A"}</dd></div>
+        <div><dt>Class</dt><dd>{className || "N/A"}</dd></div>
+        <div><dt>Generated</dt><dd>{new Date().toLocaleString()}</dd></div>
+      </dl>
+    </div>
+  );
+}
+
+function SectionTitle({ eyebrow, title, helper, action }: { eyebrow: string; title: string; helper?: string; action?: React.ReactNode }) {
+  return <header className="section-title"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2>{helper && <p>{helper}</p>}</div>{action}</header>;
 }
 
 function Metric({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
@@ -247,6 +324,10 @@ function Metric({ label, value, danger }: { label: string; value: string; danger
 
 function Skeleton({ title }: { title: string }) {
   return <section className="skeleton"><h2>{title}</h2><div /><div /><div /></section>;
+}
+
+function LoadFailed({ title, onRetry }: { title: string; onRetry: () => void }) {
+  return <section className="load-failed"><h2>{title}</h2><p>The portal could not load this section. Check the connection and try again.</p><button type="button" onClick={onRetry}>Retry</button></section>;
 }
 
 async function api<T>(path: string, token: string | null, options?: { method?: string; body?: unknown }): Promise<T> {
@@ -271,6 +352,10 @@ async function api<T>(path: string, token: string | null, options?: { method?: s
 
 function ugx(value: number | string) {
   return `UGX ${Math.round(Number(value ?? 0)).toLocaleString("en-UG")}`;
+}
+
+function printPage() {
+  window.print();
 }
 
 function title(value: string) {

@@ -26,7 +26,8 @@
     "demo:urls": "powershell -ExecutionPolicy Bypass -File scripts/Print-Aethina-LanUrls.ps1",
     "backup:sqlite": "powershell -ExecutionPolicy Bypass -File scripts/Backup-Aethina-Sqlite.ps1",
     "offline:test": "npm run offline:test --workspace apps/api",
-    "offline:smoke": "npm run offline:smoke --workspace apps/api"
+    "offline:smoke": "npm run offline:smoke --workspace apps/api",
+    "acceptance:phase1": "npm run acceptance:phase1 --workspace apps/api"
   },
   "engines": {
     "node": ">=20"

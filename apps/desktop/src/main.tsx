@@ -28,7 +28,7 @@ type Session = {
   user: { id: string; schoolId: string; displayName: string; email: string; roles: string[]; permissions: string[]; mustChangePassword: boolean };
 };
 
-type ActiveView = "dashboard" | "students" | "academics" | "timetable" | "finance" | "budgets" | "inventory" | "payroll" | "notifications" | "approvals" | "attendance" | "school" | "sync" | "risk" | "audit";
+type ActiveView = "dashboard" | "users" | "students" | "academics" | "timetable" | "finance" | "budgets" | "inventory" | "payroll" | "notifications" | "approvals" | "attendance" | "school" | "sync" | "risk" | "audit";
 
 type AppSection = {
   id: ActiveView;
@@ -43,8 +43,16 @@ type Persona = {
   summary: string;
 };
 
+type RoleWorkspace = {
+  focus: Array<{ label: string; value: string; view: ActiveView }>;
+  routines: string[];
+  alerts: string[];
+  actions: Array<{ label: string; view: ActiveView }>;
+};
+
 const appSections: AppSection[] = [
   { id: "dashboard", label: "Dashboard", group: "Command", permissions: [PermissionKey.DashboardRead] },
+  { id: "users", label: "Users & Roles", group: "Command", permissions: [PermissionKey.UsersManage] },
   { id: "students", label: "Students", group: "Learners", permissions: [PermissionKey.StudentsRead] },
   { id: "academics", label: "Academics", group: "Academics", permissions: [PermissionKey.AcademicsRead, PermissionKey.AcademicsManage, PermissionKey.MarksEntry, PermissionKey.MarksReview, PermissionKey.ReportCardsPrepare, PermissionKey.ReportCardsPublish] },
   { id: "timetable", label: "Timetable", group: "Academics", permissions: [PermissionKey.AcademicsRead, PermissionKey.TimetableManage] },
@@ -226,6 +234,26 @@ type RiskAlertRecord = {
   status: string;
   createdAt: string;
   notes?: string | null;
+};
+
+type UserRecord = {
+  id: string;
+  email: string;
+  displayName: string;
+  isActive: boolean;
+  mustChangePassword: boolean;
+  failedLoginAttempts: number;
+  lockedUntil?: string | null;
+  lastLoginAt?: string | null;
+  roles: Array<{ role: { id: string; name: string } }>;
+};
+
+type RoleOption = {
+  id: string;
+  name: string;
+  description?: string | null;
+  permissions: Array<{ permission: { key: string } }>;
+  _count?: { users: number };
 };
 
 type RegistrationForm = {
@@ -521,6 +549,16 @@ function App() {
     await refreshAll();
   }
 
+  const groupedSections = visibleSections.reduce<Array<{ group: AppSection["group"]; sections: AppSection[] }>>((groups, section) => {
+    const existing = groups.find((item) => item.group === section.group);
+    if (existing) {
+      existing.sections.push(section);
+    } else {
+      groups.push({ group: section.group, sections: [section] });
+    }
+    return groups;
+  }, []);
+
   if (!session) {
     return <LoginScreen onLogin={login} />;
   }
@@ -533,7 +571,12 @@ function App() {
           <h1>Administration</h1>
         </div>
         <nav>
-          {visibleSections.map((section) => <button key={section.id} className={activeView === section.id ? "active" : ""} onClick={() => setActiveView(section.id)}>{section.label}</button>)}
+          {groupedSections.map((group) => (
+            <div className="nav-group" key={group.group}>
+              <span className="nav-group-label">{group.group}</span>
+              {group.sections.map((section) => <button key={section.id} className={activeView === section.id ? "active" : ""} onClick={() => setActiveView(section.id)}>{section.label}</button>)}
+            </div>
+          ))}
         </nav>
         <button className="ghost" onClick={logout}>Logout</button>
       </aside>
@@ -569,9 +612,9 @@ function App() {
           </label>
         </div>
 
-        {persona && <RoleHomeCard persona={persona} sections={visibleSections} setActiveView={setActiveView} />}
+        {persona && activeView === "dashboard" && <RoleHomeCard persona={persona} sections={visibleSections} setActiveView={setActiveView} />}
 
-        {message && <div className="notice">{message}</div>}
+        {message && <div className="notice" role="status" aria-live="polite" aria-atomic="true">{message}</div>}
 
         <section className="config-band">
           <div><strong>Academic year</strong><span>{config?.academicYears.find((year) => year.id === config.school.currentAcademicYearId)?.name ?? "Not set"}</span></div>
@@ -607,6 +650,8 @@ function App() {
           <NotificationsAdminView api={api} setMessage={setMessage} />
         ) : activeView === "approvals" ? (
           <ApprovalsView api={api} setMessage={setMessage} />
+        ) : activeView === "users" ? (
+          <UsersRolesView api={api} session={session} setMessage={setMessage} />
         ) : activeView === "risk" ? (
           <RiskAlertsView api={api} setMessage={setMessage} />
         ) : activeView === "school" ? (
@@ -636,11 +681,25 @@ function App() {
               <button onClick={refreshAll}>Refresh</button>
             </div>
 
-            <table>
+            <DataTable label="Student records">
               <thead><tr><th>Admission</th><th>Name</th><th>Class</th><th>Status</th><th>Sync</th></tr></thead>
               <tbody>
                 {visibleStudents.map((student) => (
-                  <tr key={student.id} onClick={() => { setSelected(student); setForm(fromStudent(student, config)); }}>
+                  <tr
+                    key={student.id}
+                    className="clickable-row"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Select ${student.firstName} ${student.lastName}`}
+                    onClick={() => { setSelected(student); setForm(fromStudent(student, config)); }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelected(student);
+                        setForm(fromStudent(student, config));
+                      }
+                    }}
+                  >
                     <td>{student.admissionNo}</td>
                     <td>{student.firstName} {student.lastName}</td>
                     <td>{student.currentClass?.name ?? config?.classes.find((item) => item.id === student.currentClassId)?.name ?? "-"}</td>
@@ -650,7 +709,7 @@ function App() {
                 ))}
                 {visibleStudents.length === 0 && <tr><td colSpan={5} className="empty">No students match the current filters.</td></tr>}
               </tbody>
-            </table>
+            </DataTable>
           </section>
 
           <section className="detail-pane">
@@ -703,15 +762,40 @@ function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) =
 }
 
 function RoleHomeCard({ persona, sections, setActiveView }: { persona: Persona; sections: AppSection[]; setActiveView: (view: ActiveView) => void }) {
+  const workspace = roleWorkspaceFor(persona, sections);
   return (
-    <section className="role-home">
-      <div>
-        <p className="eyebrow">{persona.kicker}</p>
-        <h3>{persona.title}</h3>
-        <p>{persona.summary}</p>
+    <section className="role-home role-workspace">
+      <div className="role-intro">
+        <div>
+          <p className="eyebrow">{persona.kicker}</p>
+          <h3>{persona.title}</h3>
+          <p>{persona.summary}</p>
+        </div>
+        <div className="role-actions">
+          {workspace.actions.map((action) => <button key={action.view} type="button" className="ghost" onClick={() => setActiveView(action.view)}>{action.label}</button>)}
+        </div>
       </div>
-      <div className="role-actions">
-        {sections.slice(0, 5).map((section) => <button key={section.id} type="button" className="ghost" onClick={() => setActiveView(section.id)}>{section.label}</button>)}
+
+      <div className="role-dashboard-grid">
+        <section className="role-focus-panel">
+          <h4>Primary Workspace</h4>
+          <div className="role-focus-list">
+            {workspace.focus.map((item) => (
+              <button key={item.view} type="button" className="role-focus-card" onClick={() => setActiveView(item.view)}>
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+              </button>
+            ))}
+          </div>
+        </section>
+        <section className="role-focus-panel">
+          <h4>Daily Routine</h4>
+          <ul className="role-check-list">{workspace.routines.map((item) => <li key={item}>{item}</li>)}</ul>
+        </section>
+        <section className="role-focus-panel">
+          <h4>Watch Points</h4>
+          <ul className="role-check-list attention">{workspace.alerts.map((item) => <li key={item}>{item}</li>)}</ul>
+        </section>
       </div>
     </section>
   );
@@ -969,7 +1053,7 @@ function AttendanceView({ api, setMessage }: { api: (path: string, init?: Reques
       </section>
       <section className="operation-panel wide-panel">
         <div className="section-heading"><h3>Correction Requests</h3><span className="pill">{corrections.length} pending</span></div>
-        <table>
+        <DataTable label="Teacher attendance correction requests">
           <thead><tr><th>Teacher</th><th>Reason</th><th>Requested</th><th>Decision</th></tr></thead>
           <tbody>
             {corrections.map((record) => (
@@ -985,7 +1069,7 @@ function AttendanceView({ api, setMessage }: { api: (path: string, init?: Reques
             ))}
             {corrections.length === 0 && <tr><td colSpan={4} className="empty">No correction requests waiting for review.</td></tr>}
           </tbody>
-        </table>
+        </DataTable>
       </section>
     </section>
   );
@@ -993,7 +1077,7 @@ function AttendanceView({ api, setMessage }: { api: (path: string, init?: Reques
 
 function AttendanceTable({ records }: { records: AttendanceRecord[] }) {
   return (
-    <table>
+    <DataTable label="Teacher attendance daily register">
       <thead><tr><th>Staff</th><th>Teacher</th><th>In</th><th>Out</th><th>Status</th></tr></thead>
       <tbody>
         {records.map((record) => (
@@ -1007,7 +1091,7 @@ function AttendanceTable({ records }: { records: AttendanceRecord[] }) {
         ))}
         {records.length === 0 && <tr><td colSpan={5} className="empty">No teacher attendance recorded for this date.</td></tr>}
       </tbody>
-    </table>
+    </DataTable>
   );
 }
 
@@ -1031,7 +1115,7 @@ function SyncReviewView({ api, setMessage }: { api: (path: string, init?: Reques
   return (
     <section className="operation-panel">
       <div className="section-heading"><h3>Synchronization Conflicts</h3><button type="button" onClick={() => void load()}>Refresh</button></div>
-      <table>
+      <DataTable label="Synchronization conflicts">
         <thead><tr><th>Entity</th><th>Versions</th><th>Sensitivity</th><th>Reason</th><th>Decision</th></tr></thead>
         <tbody>
           {conflicts.map((conflict) => (
@@ -1048,7 +1132,7 @@ function SyncReviewView({ api, setMessage }: { api: (path: string, init?: Reques
           ))}
           {conflicts.length === 0 && <tr><td colSpan={5} className="empty">No open synchronization conflicts.</td></tr>}
         </tbody>
-      </table>
+      </DataTable>
     </section>
   );
 }
@@ -1074,7 +1158,7 @@ function AuditView({ api }: { api: (path: string, init?: RequestInit) => Promise
         <input placeholder="Entity type" value={entityType} onChange={(event) => setEntityType(event.target.value.toUpperCase())} />
         <button type="button" onClick={() => void load()}>Search</button>
       </div>
-      <table>
+      <DataTable label="Audit log events">
         <thead><tr><th>Time</th><th>Action</th><th>Entity</th><th>Actor</th></tr></thead>
         <tbody>
           {records.map((record) => (
@@ -1087,7 +1171,7 @@ function AuditView({ api }: { api: (path: string, init?: RequestInit) => Promise
           ))}
           {records.length === 0 && <tr><td colSpan={4} className="empty">No audit events match the current filters.</td></tr>}
         </tbody>
-      </table>
+      </DataTable>
     </section>
   );
 }
@@ -1229,20 +1313,20 @@ function DashboardView({ api, session, online, pendingCount, lastSync, setMessag
       </section>
       {!financeOnly && <section className="operation-panel">
         <div className="section-heading"><h3>Action Alerts</h3><span className="pill">{alerts.length}</span></div>
-        <table><tbody>
+        <DataTable label="Action alerts" compact><tbody>
           {alerts.map((alert, index) => <tr key={`${alert.type}-${index}`}><td><span className="pill">{alert.type}</span></td><td>{alert.title}</td><td>{alert.severity ?? ""}</td></tr>)}
           {alerts.length === 0 && <tr><td className="empty">No active alerts.</td></tr>}
-        </tbody></table>
+        </tbody></DataTable>
       </section>}
       {!financeOnly && <section className="operation-panel wide-panel">
         <div className="section-heading"><h3>Recent Activity</h3></div>
-        <table>
+        <DataTable label="Recent audit activity">
           <thead><tr><th>Time</th><th>Action</th><th>Entity</th></tr></thead>
           <tbody>
             {activity.map((item) => <tr key={item.id}><td>{new Date(item.createdAt).toLocaleString()}</td><td>{item.action}</td><td>{item.entityType}</td></tr>)}
             {activity.length === 0 && <tr><td colSpan={3} className="empty">No recent activity yet.</td></tr>}
           </tbody>
-        </table>
+        </DataTable>
       </section>}
     </section>
   );
@@ -1287,6 +1371,11 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
 
   async function createFee(event: React.FormEvent) {
     event.preventDefault();
+    const amount = positiveNumber(feeForm.amount);
+    if (!feeForm.classId || !feeForm.name.trim() || amount === null) {
+      setMessage("Choose a class, enter a fee name, and use an amount above zero.");
+      return;
+    }
     await api("/finance/fee-structures", {
       method: "POST",
       body: JSON.stringify({
@@ -1295,7 +1384,7 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
         termId: config?.school.currentTermId,
         category: feeForm.category,
         name: feeForm.name,
-        amount: Number(feeForm.amount),
+        amount,
         dueDate: new Date(feeForm.dueDate).toISOString(),
         isMandatory: feeForm.isMandatory,
         isActive: true
@@ -1306,6 +1395,10 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
   }
 
   async function generateInvoices() {
+    if (!feeForm.classId || !config?.school.currentTermId) {
+      setMessage("Choose a class and current term before generating invoices.");
+      return;
+    }
     await api("/finance/invoices/generate", { method: "POST", body: JSON.stringify({ termId: config?.school.currentTermId, classId: feeForm.classId, dueDate: new Date(feeForm.dueDate).toISOString() }) });
     setMessage("Invoices generated without duplicating existing invoices.");
     await load();
@@ -1313,9 +1406,19 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
 
   async function recordPayment(event: React.FormEvent) {
     event.preventDefault();
+    const amount = positiveNumber(paymentForm.amount);
+    const invoice = invoices.find((item) => item.id === paymentForm.invoiceId);
+    if (!invoice || amount === null) {
+      setMessage("Choose an invoice and enter a payment amount above zero.");
+      return;
+    }
+    if (amount > Number(invoice.balance)) {
+      setMessage("Payment cannot exceed the selected invoice balance.");
+      return;
+    }
     const payload = {
       invoiceId: paymentForm.invoiceId,
-      amount: Number(paymentForm.amount),
+      amount,
       method: paymentForm.method,
       reference: paymentForm.reference || null,
       paidAt: new Date(paymentForm.paidAt).toISOString(),
@@ -1340,7 +1443,12 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
 
   async function recordExpense(event: React.FormEvent) {
     event.preventDefault();
-    const payload = { ...expenseForm, amount: Number(expenseForm.amount), spentAt: new Date(expenseForm.spentAt).toISOString(), budgetId: expenseForm.budgetId || null, requestedBy: session.user.id, createdBy: session.user.id };
+    const amount = positiveNumber(expenseForm.amount);
+    if (!expenseForm.category.trim() || !expenseForm.description.trim() || amount === null) {
+      setMessage("Enter an expense category, description, and amount above zero.");
+      return;
+    }
+    const payload = { ...expenseForm, amount, spentAt: new Date(expenseForm.spentAt).toISOString(), budgetId: expenseForm.budgetId || null, requestedBy: session.user.id, createdBy: session.user.id };
     try {
       if (!online) throw new Error("Offline");
       await api("/finance/expenses", { method: "POST", body: JSON.stringify(payload) });
@@ -1355,12 +1463,30 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
     await load().catch(() => undefined);
   }
 
+  const selectedPaymentInvoice = invoices.find((invoice) => invoice.id === paymentForm.invoiceId);
+  const paymentRows = invoices.flatMap((invoice) => (invoice.payments ?? []).map((payment) => [
+    payment.receipt?.receiptNo ?? payment.receiptNo ?? "-",
+    invoice.invoiceNo,
+    `${invoice.student.firstName} ${invoice.student.lastName}`,
+    ugx(payment.amount),
+    payment.method,
+    dateOnly(payment.paidAt)
+  ]));
+  const canCreateFee = Boolean(feeForm.classId && feeForm.name.trim() && positiveNumber(feeForm.amount));
+  const canRecordPayment = Boolean(selectedPaymentInvoice && positiveNumber(paymentForm.amount) && Number(paymentForm.amount) <= Number(selectedPaymentInvoice.balance));
+  const canRecordExpense = Boolean(expenseForm.category.trim() && expenseForm.description.trim() && positiveNumber(expenseForm.amount));
+
   return (
     <section className="operations-grid finance-layout">
+      <div className="print-only wide-panel">
+        <h2>{config?.school.name ?? "Aethina School Management System"} Finance Output</h2>
+        <p>Generated {new Date().toLocaleString()} by {session.user.displayName}</p>
+      </div>
       <div className="tabs wide-panel">
         {["overview", "fees", "invoices", "payments", "expenses", "reports"].map((item) => <button key={item} className={tab === item ? "active" : "ghost"} type="button" onClick={() => setTab(item as typeof tab)}>{item}</button>)}
       </div>
       {tab === "overview" && <section className="metric-grid wide-panel">
+        <div className="section-heading print-span"><h3>Essential Financial Summary</h3><button type="button" className="ghost no-print" onClick={printPage}>Print</button></div>
         <div className="metric"><span>Expected</span><strong>{ugx(overview?.expectedFees)}</strong></div>
         <div className="metric"><span>Collected</span><strong>{ugx(overview?.collectedFees)}</strong></div>
         <div className="metric"><span>Outstanding</span><strong>{ugx(overview?.outstandingFees)}</strong></div>
@@ -1369,42 +1495,43 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
         <div className="metric"><span>Expenses</span><strong>{ugx(overview?.expenses)}</strong></div>
       </section>}
       {tab === "fees" && <section className="operation-panel wide-panel">
-        <div className="section-heading"><h3>Fee Structures</h3><button type="button" onClick={generateInvoices}>Generate Invoices</button></div>
+        <div className="section-heading"><h3>Fee Structures</h3><button type="button" onClick={generateInvoices} disabled={!feeForm.classId}>Generate Invoices</button></div>
         <form className="inline-form" onSubmit={(event) => void createFee(event)}>
           <select value={feeForm.classId} onChange={(event) => setFeeForm({ ...feeForm, classId: event.target.value })}>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select>
           <input placeholder="Category" value={feeForm.category} onChange={(event) => setFeeForm({ ...feeForm, category: event.target.value })} />
-          <input placeholder="Fee name" value={feeForm.name} onChange={(event) => setFeeForm({ ...feeForm, name: event.target.value })} />
-          <input type="number" placeholder="Amount" value={feeForm.amount} onChange={(event) => setFeeForm({ ...feeForm, amount: event.target.value })} />
+          <input placeholder="Fee name" value={feeForm.name} onChange={(event) => setFeeForm({ ...feeForm, name: event.target.value })} required />
+          <input type="number" min="1" step="1" placeholder="Amount" value={feeForm.amount} onChange={(event) => setFeeForm({ ...feeForm, amount: event.target.value })} required />
           <input type="date" value={feeForm.dueDate} onChange={(event) => setFeeForm({ ...feeForm, dueDate: event.target.value })} />
-          <button type="submit">Add Fee</button>
+          <button type="submit" disabled={!canCreateFee}>Add Fee</button>
         </form>
         <FinanceTable rows={fees.map((fee) => [fee.class?.name ?? "-", fee.category, fee.name, ugx(fee.amount), fee.isActive ? "Active" : "Inactive"])} headings={["Class", "Category", "Name", "Amount", "Status"]} />
       </section>}
-      {tab === "invoices" && <section className="operation-panel wide-panel"><div className="section-heading"><h3>Student Invoices</h3></div><InvoiceTable invoices={invoices} /></section>}
+      {tab === "invoices" && <section className="operation-panel wide-panel"><div className="section-heading"><h3>Student Invoices / Fee Statements</h3><button type="button" className="ghost no-print" onClick={printPage}>Print</button></div><InvoiceTable invoices={invoices} /></section>}
       {tab === "payments" && <section className="operation-panel wide-panel">
-        <div className="section-heading"><h3>Record Payment</h3><span className="pill">{localPayments.length} offline pending</span></div>
+        <div className="section-heading"><h3>Record Payment</h3><div className="row-actions"><button type="button" className="ghost no-print" onClick={printPage}>Print Receipts</button><span className="pill">{localPayments.length} offline pending</span></div></div>
         <form className="inline-form" onSubmit={(event) => void recordPayment(event)}>
           <select value={paymentForm.invoiceId} onChange={(event) => setPaymentForm({ ...paymentForm, invoiceId: event.target.value })}><option value="">Select invoice</option>{invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNo} - {invoice.student.firstName} {invoice.student.lastName} - {ugx(invoice.balance)}</option>)}</select>
-          <input type="number" placeholder="Amount" value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} />
+          <input type="number" min="1" max={selectedPaymentInvoice ? Number(selectedPaymentInvoice.balance) : undefined} step="1" placeholder="Amount" value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} required />
           <select value={paymentForm.method} onChange={(event) => setPaymentForm({ ...paymentForm, method: event.target.value })}>{["CASH", "MOBILE_MONEY", "BANK_TRANSFER", "BANK_DEPOSIT", "CHEQUE", "ONLINE_PAYMENT", "OTHER"].map((method) => <option key={method}>{method}</option>)}</select>
           <input placeholder="Reference" value={paymentForm.reference} onChange={(event) => setPaymentForm({ ...paymentForm, reference: event.target.value })} />
           <input type="date" value={paymentForm.paidAt} onChange={(event) => setPaymentForm({ ...paymentForm, paidAt: event.target.value })} />
-          <button type="submit">Record</button>
+          <button type="submit" disabled={!canRecordPayment}>Record</button>
         </form>
+        <FinanceTable rows={paymentRows} headings={["Receipt", "Invoice", "Student", "Amount", "Method", "Paid"]} />
       </section>}
       {tab === "expenses" && <section className="operation-panel wide-panel">
         <div className="section-heading"><h3>Expenses</h3><span className="pill">{localExpenses.length} offline pending</span></div>
         <form className="inline-form" onSubmit={(event) => void recordExpense(event)}>
-          <input placeholder="Category" value={expenseForm.category} onChange={(event) => setExpenseForm({ ...expenseForm, category: event.target.value })} />
+          <input placeholder="Category" value={expenseForm.category} onChange={(event) => setExpenseForm({ ...expenseForm, category: event.target.value })} required />
           <input placeholder="Department" value={expenseForm.department} onChange={(event) => setExpenseForm({ ...expenseForm, department: event.target.value })} />
-          <input placeholder="Description" value={expenseForm.description} onChange={(event) => setExpenseForm({ ...expenseForm, description: event.target.value })} />
-          <input type="number" placeholder="Amount" value={expenseForm.amount} onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })} />
+          <input placeholder="Description" value={expenseForm.description} onChange={(event) => setExpenseForm({ ...expenseForm, description: event.target.value })} required />
+          <input type="number" min="1" step="1" placeholder="Amount" value={expenseForm.amount} onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })} required />
           <input placeholder="Payee" value={expenseForm.payee} onChange={(event) => setExpenseForm({ ...expenseForm, payee: event.target.value })} />
-          <button type="submit">Record</button>
+          <button type="submit" disabled={!canRecordExpense}>Record</button>
         </form>
         <FinanceTable rows={expenses.map((expense) => [expense.expenseNo ?? "-", expense.category, expense.department ?? "-", ugx(expense.amount), expense.approvalStatus])} headings={["No.", "Category", "Department", "Amount", "Status"]} />
       </section>}
-      {tab === "reports" && <section className="operation-panel wide-panel"><div className="section-heading"><h3>Initial Reports</h3></div><FinanceTable rows={invoices.map((invoice) => [invoice.student.admissionNo, `${invoice.student.firstName} ${invoice.student.lastName}`, ugx(invoice.amount), ugx(invoice.amountPaid), ugx(invoice.balance)])} headings={["Admission", "Student", "Expected", "Paid", "Balance"]} /></section>}
+      {tab === "reports" && <section className="operation-panel wide-panel"><div className="section-heading"><h3>Initial Reports</h3><button type="button" className="ghost no-print" onClick={printPage}>Print</button></div><FinanceTable rows={invoices.map((invoice) => [invoice.student.admissionNo, `${invoice.student.firstName} ${invoice.student.lastName}`, ugx(invoice.amount), ugx(invoice.amountPaid), ugx(invoice.balance)])} headings={["Admission", "Student", "Expected", "Paid", "Balance"]} /></section>}
     </section>
   );
 }
@@ -1422,13 +1549,25 @@ function BudgetsView({ api, config, session, online, refreshOfflineState, setMes
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Budgets unavailable.")); }, []);
   async function createBudget(event: React.FormEvent) {
     event.preventDefault();
-    await api("/finance/budgets", { method: "POST", body: JSON.stringify({ ...form, amount: Number(form.amount), warningThreshold: Number(form.warningThreshold), year: Number(form.year), academicYearId: config?.school.currentAcademicYearId, termId: config?.school.currentTermId }) });
+    const amount = positiveNumber(form.amount);
+    const warningThreshold = Number(form.warningThreshold);
+    const year = Number(form.year);
+    if (!form.name.trim() || !form.department.trim() || !form.category.trim() || amount === null || !Number.isInteger(warningThreshold) || warningThreshold < 1 || warningThreshold > 100 || !Number.isInteger(year)) {
+      setMessage("Complete the budget name, department, category, amount, year, and warning threshold.");
+      return;
+    }
+    await api("/finance/budgets", { method: "POST", body: JSON.stringify({ ...form, amount, warningThreshold, year, academicYearId: config?.school.currentAcademicYearId, termId: config?.school.currentTermId }) });
     setMessage("Budget created.");
     await load();
   }
   async function submitRequest(event: React.FormEvent) {
     event.preventDefault();
-    const payload = { budgetId: request.budgetId, amount: Number(request.amount), reason: request.reason, requestedBy: session.user.id };
+    const amount = positiveNumber(request.amount);
+    if (!request.budgetId || amount === null || request.reason.trim().length < 10) {
+      setMessage("Choose a budget, enter an amount above zero, and give a reason of at least 10 characters.");
+      return;
+    }
+    const payload = { budgetId: request.budgetId, amount, reason: request.reason, requestedBy: session.user.id };
     if (!online) {
       await addPendingChange({ id: crypto.randomUUID(), entityType: SyncEntityType.BudgetRequest, entityId: crypto.randomUUID(), operation: "CREATE", payload, baseVersion: null, createdAt: new Date().toISOString(), retryCount: 0 }, session.user.schoolId, deviceId);
       await refreshOfflineState();
@@ -1439,6 +1578,9 @@ function BudgetsView({ api, config, session, online, refreshOfflineState, setMes
     setMessage("Budget request submitted.");
     await load();
   }
+  const canCreateBudget = Boolean(form.name.trim() && form.department.trim() && form.category.trim() && positiveNumber(form.amount));
+  const canSubmitBudgetRequest = Boolean(request.budgetId && positiveNumber(request.amount) && request.reason.trim().length >= 10);
+
   return (
     <section className="operations-grid">
       <section className="operation-panel wide-panel">
@@ -1450,17 +1592,17 @@ function BudgetsView({ api, config, session, online, refreshOfflineState, setMes
         })} headings={["Budget", "Department", "Category", "Allocated", "Spent", "Remaining", "Used", "Status"]} />
       </section>
       <form className="operation-panel panel-form" onSubmit={(event) => void createBudget(event)}>
-        <div className="section-heading"><h3>Create Budget</h3><button type="submit">Save</button></div>
-        <input placeholder="Budget name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
-        <input placeholder="Department" value={form.department} onChange={(event) => setForm({ ...form, department: event.target.value })} />
-        <input placeholder="Category" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} />
-        <input type="number" placeholder="Amount" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} />
+        <div className="section-heading"><h3>Create Budget</h3><button type="submit" disabled={!canCreateBudget}>Save</button></div>
+        <input placeholder="Budget name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required />
+        <input placeholder="Department" value={form.department} onChange={(event) => setForm({ ...form, department: event.target.value })} required />
+        <input placeholder="Category" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} required />
+        <input type="number" min="1" step="1" placeholder="Amount" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} required />
       </form>
       <form className="operation-panel panel-form" onSubmit={(event) => void submitRequest(event)}>
-        <div className="section-heading"><h3>Budget Request</h3><button type="submit">Submit</button></div>
+        <div className="section-heading"><h3>Budget Request</h3><button type="submit" disabled={!canSubmitBudgetRequest}>Submit</button></div>
         <select value={request.budgetId} onChange={(event) => setRequest({ ...request, budgetId: event.target.value })}>{budgets.map((budget) => <option key={budget.id} value={budget.id}>{budget.name}</option>)}</select>
-        <input type="number" placeholder="Amount" value={request.amount} onChange={(event) => setRequest({ ...request, amount: event.target.value })} />
-        <textarea placeholder="Reason" value={request.reason} onChange={(event) => setRequest({ ...request, reason: event.target.value })} />
+        <input type="number" min="1" step="1" placeholder="Amount" value={request.amount} onChange={(event) => setRequest({ ...request, amount: event.target.value })} required />
+        <textarea placeholder="Reason" value={request.reason} onChange={(event) => setRequest({ ...request, reason: event.target.value })} required />
       </form>
     </section>
   );
@@ -1475,7 +1617,246 @@ function ApprovalsView({ api, setMessage }: { api: (path: string, init?: Request
     setMessage(`Approval ${decision.toLowerCase().replaceAll("_", " ")}.`);
     await load();
   }
-  return <section className="operation-panel"><div className="section-heading"><h3>Approval Inbox</h3><button type="button" onClick={() => void load()}>Refresh</button></div><table><thead><tr><th>Type</th><th>Submitted</th><th>Level</th><th>Status</th><th>Decision</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.entityType}<br /><small>{row.entityId}</small></td><td>{new Date(row.createdAt).toLocaleString()}</td><td>{row.approvalLevel}</td><td><span className="pill">{row.status}</span></td><td className="row-actions"><button type="button" onClick={() => void decide(row.id, "APPROVED")}>Approve</button><button className="ghost" type="button" onClick={() => void decide(row.id, "REJECTED")}>Reject</button><button className="ghost" type="button" onClick={() => void decide(row.id, "RETURNED_FOR_CORRECTION")}>Return</button></td></tr>)}{rows.length === 0 && <tr><td colSpan={5} className="empty">No approval items waiting.</td></tr>}</tbody></table></section>;
+  return <section className="operation-panel"><div className="section-heading"><h3>Approval Inbox</h3><button type="button" onClick={() => void load()}>Refresh</button></div><DataTable label="Approval inbox"><thead><tr><th>Type</th><th>Submitted</th><th>Level</th><th>Status</th><th>Decision</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.entityType}<br /><small>{row.entityId}</small></td><td>{new Date(row.createdAt).toLocaleString()}</td><td>{row.approvalLevel}</td><td><span className="pill">{row.status}</span></td><td className="row-actions"><button type="button" onClick={() => void decide(row.id, "APPROVED")}>Approve</button><button className="ghost" type="button" onClick={() => void decide(row.id, "REJECTED")}>Reject</button><button className="ghost" type="button" onClick={() => void decide(row.id, "RETURNED_FOR_CORRECTION")}>Return</button></td></tr>)}{rows.length === 0 && <tr><td colSpan={5} className="empty">No approval items waiting.</td></tr>}</tbody></DataTable></section>;
+}
+
+function UsersRolesView({ api, session, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; session: Session; setMessage: (message: string) => void }) {
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
+  const [resetUserId, setResetUserId] = useState("");
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [createForm, setCreateForm] = useState({ displayName: "", email: "", temporaryPassword: "", roleIds: [] as string[] });
+  const [roleEditUserId, setRoleEditUserId] = useState("");
+  const [roleEditIds, setRoleEditIds] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    const [nextUsers, nextRoles] = await Promise.all([api("/users"), api("/users/roles")]);
+    setUsers(asArray<UserRecord>(nextUsers));
+    setRoles(asArray<RoleOption>(nextRoles));
+  }
+
+  useEffect(() => {
+    void load().catch((error) => setMessage(error instanceof Error ? error.message : "Users unavailable."));
+  }, []);
+
+  const filteredUsers = users.filter((user) => {
+    const haystack = `${user.displayName} ${user.email} ${roleNames(user).join(" ")}`.toLowerCase();
+    const matchesSearch = !search || haystack.includes(search.toLowerCase());
+    const matchesStatus = !status || (status === "ACTIVE" ? user.isActive : !user.isActive);
+    return matchesSearch && matchesStatus;
+  });
+  const selectedResetUser = users.find((user) => user.id === resetUserId);
+  const selectedRoleUser = users.find((user) => user.id === roleEditUserId);
+  const roleSummary = summarizeRoles(users);
+
+  async function setActive(user: UserRecord, isActive: boolean) {
+    if (user.id === session.user.id && !isActive) {
+      setMessage("You cannot deactivate your own active session.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/users/${user.id}/${isActive ? "activate" : "deactivate"}`, { method: "POST", body: "{}" });
+      setMessage(`${user.displayName} ${isActive ? "reactivated" : "deactivated"}.`);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetPassword(event: React.FormEvent) {
+    event.preventDefault();
+    if (!resetUserId) {
+      setMessage("Choose a user before resetting a password.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/users/reset-password", { method: "POST", body: JSON.stringify({ userId: resetUserId, temporaryPassword }) });
+      setTemporaryPassword("");
+      setMessage(`Temporary password set for ${selectedResetUser?.displayName ?? "selected user"}.`);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createUser(event: React.FormEvent) {
+    event.preventDefault();
+    if (createForm.roleIds.length === 0) {
+      setMessage("Choose at least one role for the new user.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/users", { method: "POST", body: JSON.stringify(createForm) });
+      setCreateForm({ displayName: "", email: "", temporaryPassword: "", roleIds: [] });
+      setMessage("User created with temporary password and assigned roles.");
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveRoles(event: React.FormEvent) {
+    event.preventDefault();
+    if (!roleEditUserId || roleEditIds.length === 0) {
+      setMessage("Choose a user and at least one role.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/users/${roleEditUserId}/roles`, { method: "POST", body: JSON.stringify({ roleIds: roleEditIds }) });
+      setRoleEditUserId("");
+      setRoleEditIds([]);
+      setMessage(`Roles updated for ${selectedRoleUser?.displayName ?? "selected user"}.`);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startRoleEdit(user: UserRecord) {
+    setRoleEditUserId(user.id);
+    setRoleEditIds(user.roles.map((item) => item.role.id));
+  }
+
+  return (
+    <section className="operation-panel wide-panel">
+      <div className="section-heading">
+        <div>
+          <h3>User & Role Management</h3>
+          <p className="panel-copy">Manage staff access, temporary passwords, account status, and role visibility.</p>
+        </div>
+        <button type="button" onClick={() => void load()} disabled={busy}>Refresh</button>
+      </div>
+
+      <div className="summary-strip">
+        <span>{users.filter((user) => user.isActive).length} active users</span>
+        <span>{users.filter((user) => !user.isActive).length} inactive users</span>
+        <span>{users.filter((user) => user.mustChangePassword).length} password resets pending</span>
+        <span>{roleSummary.length} roles in use</span>
+      </div>
+
+      <div className="filters user-filters">
+        <input placeholder="Search name, email, or role" value={search} onChange={(event) => setSearch(event.target.value)} />
+        <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <option value="">All statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="INACTIVE">Inactive</option>
+        </select>
+        <button type="button" onClick={() => { setSearch(""); setStatus(""); }}>Clear</button>
+      </div>
+
+      <div className="role-matrix">
+        {roleSummary.map((role) => (
+          <div key={role.name}>
+            <strong>{formatRoleName(role.name)}</strong>
+            <span>{role.count} user{role.count === 1 ? "" : "s"}</span>
+          </div>
+        ))}
+        {roleSummary.length === 0 && <div><strong>No roles</strong><span>No role assignments found.</span></div>}
+      </div>
+
+      <DataTable label="Users and assigned roles">
+          <thead><tr><th>User</th><th>Roles</th><th>Status</th><th>Security</th><th>Last Login</th><th>Actions</th></tr></thead>
+          <tbody>
+            {filteredUsers.map((user) => (
+              <tr key={user.id}>
+                <td>{user.displayName}<br /><small>{user.email}</small></td>
+                <td><div className="pill-stack">{roleNames(user).map((role) => <span className="pill" key={role}>{formatRoleName(role)}</span>)}</div></td>
+                <td><span className="pill">{user.isActive ? "ACTIVE" : "INACTIVE"}</span></td>
+                <td>
+                  {user.mustChangePassword ? "Password reset pending" : "Password current"}
+                  {user.lockedUntil && <><br /><small>Locked until {new Date(user.lockedUntil).toLocaleString()}</small></>}
+                  {user.failedLoginAttempts > 0 && <><br /><small>{user.failedLoginAttempts} failed login attempt{user.failedLoginAttempts === 1 ? "" : "s"}</small></>}
+                </td>
+                <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : "Never"}</td>
+                <td className="row-actions">
+                  <button className="ghost" type="button" onClick={() => setResetUserId(user.id)}>Reset</button>
+                  <button className="ghost" type="button" disabled={user.id === session.user.id} onClick={() => startRoleEdit(user)}>Roles</button>
+                  {user.isActive ? (
+                    <button className="ghost" type="button" disabled={busy || user.id === session.user.id} onClick={() => void setActive(user, false)}>Deactivate</button>
+                  ) : (
+                    <button type="button" disabled={busy} onClick={() => void setActive(user, true)}>Reactivate</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {filteredUsers.length === 0 && <tr><td colSpan={6} className="empty">No users match the current filters.</td></tr>}
+          </tbody>
+      </DataTable>
+
+      <form className="admin-form-panel" onSubmit={createUser}>
+        <div>
+          <h4>Create Staff User</h4>
+          <p className="panel-copy">New users must change their temporary password after first login.</p>
+        </div>
+        <div className="inline-admin-form embedded">
+          <label>
+            Name
+            <input value={createForm.displayName} onChange={(event) => setCreateForm({ ...createForm, displayName: event.target.value })} placeholder="Full name" required />
+          </label>
+          <label>
+            Email
+            <input type="email" value={createForm.email} onChange={(event) => setCreateForm({ ...createForm, email: event.target.value })} placeholder="name@school.test" required />
+          </label>
+          <label>
+            Temporary password
+            <input type="password" value={createForm.temporaryPassword} minLength={10} onChange={(event) => setCreateForm({ ...createForm, temporaryPassword: event.target.value })} placeholder="At least 10 characters" required />
+          </label>
+          <button type="submit" disabled={busy || createForm.roleIds.length === 0}>Create User</button>
+        </div>
+        <RoleChecklist roles={roles} selected={createForm.roleIds} onChange={(roleIds) => setCreateForm({ ...createForm, roleIds })} />
+      </form>
+
+      <form className="admin-form-panel" onSubmit={saveRoles}>
+        <div className="section-heading compact-heading">
+          <div>
+            <h4>Assign Roles</h4>
+            <p className="panel-copy">{selectedRoleUser ? `${selectedRoleUser.displayName} - ${selectedRoleUser.email}` : "Select a user from the table."}</p>
+          </div>
+          <button type="submit" disabled={busy || !roleEditUserId || roleEditIds.length === 0}>Save Roles</button>
+        </div>
+        <RoleChecklist roles={roles} selected={roleEditIds} onChange={setRoleEditIds} />
+      </form>
+
+      <form className="inline-admin-form" onSubmit={resetPassword}>
+        <label>
+          User
+          <select value={resetUserId} onChange={(event) => setResetUserId(event.target.value)}>
+            <option value="">Choose user</option>
+            {users.map((user) => <option key={user.id} value={user.id}>{user.displayName} - {user.email}</option>)}
+          </select>
+        </label>
+        <label>
+          Temporary password
+          <input type="password" value={temporaryPassword} minLength={10} onChange={(event) => setTemporaryPassword(event.target.value)} placeholder="At least 10 characters" required />
+        </label>
+        <button type="submit" disabled={busy || !resetUserId || temporaryPassword.length < 10}>Set Password</button>
+      </form>
+    </section>
+  );
+}
+
+function RoleChecklist({ roles, selected, onChange }: { roles: RoleOption[]; selected: string[]; onChange: (roleIds: string[]) => void }) {
+  return (
+    <div className="role-checklist">
+      {roles.map((role) => (
+        <label key={role.id}>
+          <input type="checkbox" checked={selected.includes(role.id)} onChange={() => onChange(toggleId(selected, role.id))} />
+          <span>
+            <strong>{formatRoleName(role.name)}</strong>
+            <small>{role.permissions.length} permission{role.permissions.length === 1 ? "" : "s"} - {role._count?.users ?? 0} user{role._count?.users === 1 ? "" : "s"}</small>
+          </span>
+        </label>
+      ))}
+      {roles.length === 0 && <div className="empty-state">No roles have been configured for this school.</div>}
+    </div>
+  );
 }
 
 function RiskAlertsView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
@@ -1487,22 +1868,142 @@ function RiskAlertsView({ api, setMessage }: { api: (path: string, init?: Reques
     setMessage(`Risk alert marked ${status.toLowerCase().replaceAll("_", " ")}.`);
     await load();
   }
-  return <section className="operation-panel"><div className="section-heading"><h3>Financial Risk Alert Center</h3><button type="button" onClick={() => void load()}>Refresh</button></div><table><thead><tr><th>Risk</th><th>Entity</th><th>Amount</th><th>Reason</th><th>Status</th><th>Review</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.category}<br /><span className="pill">{row.severity}</span></td><td>{row.entityType}<br /><small>{row.entityId}</small></td><td>{ugx(row.amount)}</td><td>{row.reason}</td><td>{row.status}</td><td className="row-actions"><button type="button" onClick={() => void review(row.id, "UNDER_REVIEW")}>Review</button><button className="ghost" type="button" onClick={() => void review(row.id, "RESOLVED")}>Resolve</button><button className="ghost" type="button" onClick={() => void review(row.id, "FALSE_POSITIVE")}>False Positive</button><button className="ghost" type="button" onClick={() => void review(row.id, "ESCALATED")}>Escalate</button></td></tr>)}{rows.length === 0 && <tr><td colSpan={6} className="empty">No financial risk alerts found.</td></tr>}</tbody></table></section>;
+  return <section className="operation-panel"><div className="section-heading"><h3>Financial Risk Alert Center</h3><button type="button" onClick={() => void load()}>Refresh</button></div><DataTable label="Financial risk alerts"><thead><tr><th>Risk</th><th>Entity</th><th>Amount</th><th>Reason</th><th>Status</th><th>Review</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.category}<br /><span className="pill">{row.severity}</span></td><td>{row.entityType}<br /><small>{row.entityId}</small></td><td>{ugx(row.amount)}</td><td>{row.reason}</td><td>{row.status}</td><td className="row-actions"><button type="button" onClick={() => void review(row.id, "UNDER_REVIEW")}>Review</button><button className="ghost" type="button" onClick={() => void review(row.id, "RESOLVED")}>Resolve</button><button className="ghost" type="button" onClick={() => void review(row.id, "FALSE_POSITIVE")}>False Positive</button><button className="ghost" type="button" onClick={() => void review(row.id, "ESCALATED")}>Escalate</button></td></tr>)}{rows.length === 0 && <tr><td colSpan={6} className="empty">No financial risk alerts found.</td></tr>}</tbody></DataTable></section>;
 }
 
 function AcademicsAdminView({ api, config, session, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; session: Session; setMessage: (message: string) => void }) {
   const [exams, setExams] = useState<any[]>([]);
   const [assessments, setAssessments] = useState<any[]>([]);
   const [cards, setCards] = useState<any[]>([]);
+  const [examForm, setExamForm] = useState({ name: "", examinationType: "End of Term", startsAt: new Date().toISOString().slice(0, 10), endsAt: new Date().toISOString().slice(0, 10), status: "DRAFT", description: "" });
+  const [assessmentForm, setAssessmentForm] = useState({ examinationId: "", subjectId: "", classId: "", streamId: "", teacherId: "", name: "", maxScore: "100", weight: "100", passMark: "" });
+  const [selectedAssessmentId, setSelectedAssessmentId] = useState("");
+  const [marksEntry, setMarksEntry] = useState<{ assessment: any; students: any[] } | null>(null);
+  const [marksDraft, setMarksDraft] = useState<Record<string, { score: string; teacherComment: string }>>({});
+  const [marksBusy, setMarksBusy] = useState(false);
   const permissionSet = new Set(session.user.permissions);
   const canPrepareReports = permissionSet.has(PermissionKey.ReportCardsPrepare);
   const canPublishReports = permissionSet.has(PermissionKey.ReportCardsPublish);
   const canManageAcademics = permissionSet.has(PermissionKey.AcademicsManage);
+  const canReviewMarks = permissionSet.has(PermissionKey.MarksReview);
+  const canEnterMarks = permissionSet.has(PermissionKey.MarksEntry);
   async function load() {
     const [nextExams, nextAssessments, nextCards] = await Promise.all([api("/academics/examinations"), api("/academics/assessments"), api("/academics/report-cards")]);
-    setExams(asArray<any>(nextExams));
-    setAssessments(asArray<any>(nextAssessments));
+    const examRows = asArray<any>(nextExams);
+    const assessmentRows = asArray<any>(nextAssessments);
+    setExams(examRows);
+    setAssessments(assessmentRows);
     setCards(asArray<any>(nextCards));
+    setAssessmentForm((current) => ({
+      ...current,
+      examinationId: current.examinationId || examRows[0]?.id || "",
+      subjectId: current.subjectId || config?.subjects[0]?.id || "",
+      classId: current.classId || config?.classes[0]?.id || "",
+      streamId: current.streamId || config?.classes[0]?.streams[0]?.id || "",
+      teacherId: current.teacherId || config?.teachers?.[0]?.id || ""
+    }));
+    if (canEnterMarks && !selectedAssessmentId && assessmentRows[0]?.id) {
+      setSelectedAssessmentId(assessmentRows[0].id);
+      await loadMarksEntry(assessmentRows[0].id);
+    }
+  }
+  async function createExam(event: React.FormEvent) {
+    event.preventDefault();
+    await api("/academics/examinations", {
+      method: "POST",
+      body: JSON.stringify({
+        termId: config?.school.currentTermId,
+        academicYearId: config?.school.currentAcademicYearId,
+        name: examForm.name,
+        examinationType: examForm.examinationType,
+        startsAt: dateToIso(examForm.startsAt),
+        endsAt: dateToIso(examForm.endsAt),
+        status: examForm.status,
+        description: examForm.description || null
+      })
+    });
+    setExamForm({ ...examForm, name: "", description: "" });
+    setMessage("Examination created for the current term.");
+    await load();
+  }
+  async function createAssessment(event: React.FormEvent) {
+    event.preventDefault();
+    await api("/academics/assessments", {
+      method: "POST",
+      body: JSON.stringify({
+        termId: config?.school.currentTermId,
+        examinationId: assessmentForm.examinationId,
+        subjectId: assessmentForm.subjectId,
+        classId: assessmentForm.classId,
+        streamId: assessmentForm.streamId || null,
+        teacherId: assessmentForm.teacherId || null,
+        name: assessmentForm.name,
+        maxScore: Number(assessmentForm.maxScore),
+        weight: Number(assessmentForm.weight),
+        passMark: assessmentForm.passMark ? Number(assessmentForm.passMark) : null
+      })
+    });
+    setAssessmentForm({ ...assessmentForm, name: "" });
+    setMessage("Assessment created and ready for marks entry.");
+    await load();
+  }
+  async function decideAssessment(id: string, decision: "APPROVED" | "REJECTED" | "RETURNED" | "PUBLISHED") {
+    await api(`/academics/assessments/${id}/decision`, { method: "POST", body: JSON.stringify({ decision, comment: `DOS ${decision.toLowerCase()} from workspace` }) });
+    setMessage(`Assessment ${decision.toLowerCase()} successfully.`);
+    await load();
+  }
+  async function loadMarksEntry(assessmentId: string) {
+    if (!assessmentId) {
+      setMarksEntry(null);
+      setMarksDraft({});
+      return;
+    }
+    const entry = await api(`/academics/marks-entry/${assessmentId}`);
+    const students = asArray<any>(entry.students);
+    setMarksEntry({ assessment: entry.assessment, students });
+    setMarksDraft(Object.fromEntries(students.map((student) => [student.id, {
+      score: student.mark?.score === undefined || student.mark?.score === null ? "" : String(student.mark.score),
+      teacherComment: student.mark?.teacherComment ?? ""
+    }])));
+  }
+  async function chooseMarksAssessment(assessmentId: string) {
+    setSelectedAssessmentId(assessmentId);
+    try {
+      await loadMarksEntry(assessmentId);
+    } catch (error) {
+      setMarksEntry(null);
+      setMarksDraft({});
+      setMessage(error instanceof Error ? error.message : "Marks entry unavailable.");
+    }
+  }
+  function updateMarkDraft(studentId: string, patch: Partial<{ score: string; teacherComment: string }>) {
+    setMarksDraft((current) => ({ ...current, [studentId]: { score: current[studentId]?.score ?? "", teacherComment: current[studentId]?.teacherComment ?? "", ...patch } }));
+  }
+  async function submitMarks(status: "DRAFT" | "SUBMITTED") {
+    if (!marksEntry) return;
+    const maxScore = Number(marksEntry.assessment.maxScore);
+    const entries = marksEntry.students
+      .map((student) => ({ studentId: student.id, score: Number(marksDraft[student.id]?.score), teacherComment: marksDraft[student.id]?.teacherComment?.trim() || null }))
+      .filter((entry) => Number.isFinite(entry.score));
+    if (entries.length === 0) {
+      setMessage("Enter at least one score before saving marks.");
+      return;
+    }
+    if (entries.some((entry) => entry.score < 0 || entry.score > maxScore)) {
+      setMessage(`Scores must be between 0 and ${maxScore}.`);
+      return;
+    }
+    setMarksBusy(true);
+    try {
+      await api("/academics/marks", { method: "POST", body: JSON.stringify({ assessmentId: marksEntry.assessment.id, entries, status, deviceId }) });
+      setMessage(status === "SUBMITTED" ? "Marks submitted for DOS review." : "Marks draft saved.");
+      await load();
+      await loadMarksEntry(marksEntry.assessment.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Marks could not be saved.");
+    } finally {
+      setMarksBusy(false);
+    }
   }
   async function prepareReports() {
     await api("/academics/report-cards/generate", { method: "POST", body: JSON.stringify({ termId: config?.school.currentTermId }) });
@@ -1517,29 +2018,142 @@ function AcademicsAdminView({ api, config, session, setMessage }: { api: (path: 
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Academics unavailable.")); }, []);
   const termName = config?.academicYears.flatMap((year) => year.terms).find((term) => term.id === config.school.currentTermId)?.name ?? "-";
   return <section className="operation-panel wide-panel">
+    <div className="print-only">
+      <h2>{config?.school.name ?? "Aethina School Management System"} Academic Report Output</h2>
+      <p>Generated {new Date().toLocaleString()}</p>
+    </div>
     <div className="section-heading">
       <h3>{canManageAcademics ? "DOS Academic Management" : canPrepareReports ? "Class Teacher Reports" : "Teacher Academics"}</h3>
       <div className="row-actions">
+        <button type="button" className="ghost no-print" onClick={printPage}>Print Reports</button>
         {canPrepareReports && <button type="button" onClick={() => void prepareReports()}>Prepare Reports</button>}
         <button type="button" onClick={() => void load()}>Refresh</button>
       </div>
     </div>
     <div className="summary-strip"><span>Current term: {termName}</span><span>{assessments.filter((item) => item.status === "SUBMITTED").length} awaiting review</span><span>{cards.filter((item) => item.status === "PUBLISHED").length} published report cards</span></div>
-    <FinanceTable headings={["Exam", "Type", "Status", "Window"]} rows={exams.map((exam) => [exam.name, exam.examinationType ?? "-", exam.status ?? "-", `${dateOnly(exam.startsAt)} - ${dateOnly(exam.endsAt)}`])} />
-    <FinanceTable headings={["Assessment", "Subject", "Status", "Marks"]} rows={assessments.map((item) => [item.name, item.subject?.name ?? "-", item.status ?? "-", item.marks?.length ?? 0])} />
-    <div className="table-scroll"><table><thead><tr><th>Student</th><th>Grade</th><th>Average</th><th>Status</th><th>DOS action</th></tr></thead><tbody>
+    {canEnterMarks && <section className="operation-panel marks-entry-panel">
+      <div className="section-heading">
+        <h3>Marks Entry</h3>
+        <div className="row-actions">
+          <button type="button" className="ghost" onClick={() => void loadMarksEntry(selectedAssessmentId)} disabled={!selectedAssessmentId || marksBusy}>Reload Roster</button>
+          <button type="button" className="ghost" onClick={() => void submitMarks("DRAFT")} disabled={!marksEntry || marksBusy}>Save Draft</button>
+          <button type="button" onClick={() => void submitMarks("SUBMITTED")} disabled={!marksEntry || marksBusy}>Submit Marks</button>
+        </div>
+      </div>
+      <div className="marks-entry-toolbar">
+        <label>Assessment<select value={selectedAssessmentId} onChange={(event) => void chooseMarksAssessment(event.target.value)}><option value="">Select assessment</option>{assessments.map((assessment) => <option key={assessment.id} value={assessment.id}>{assessment.name} - {assessment.subject?.name ?? "Subject"} ({assessment.status ?? "DRAFT"})</option>)}</select></label>
+        <div><strong>{marksEntry?.assessment?.subject?.name ?? "No subject selected"}</strong><span>Max score: {marksEntry ? String(marksEntry.assessment.maxScore) : "-"}</span></div>
+      </div>
+      <DataTable label="Teacher marks entry" compact>
+        <thead><tr><th>Student</th><th>Current Score</th><th>Score</th><th>Comment</th></tr></thead>
+        <tbody>
+          {marksEntry?.students.map((student) => <tr key={student.id}>
+            <td>{student.admissionNo}<br /><small>{student.firstName} {student.lastName}</small></td>
+            <td>{student.mark?.score ?? "-"}</td>
+            <td><input className="compact-input" type="number" min="0" max={Number(marksEntry.assessment.maxScore)} value={marksDraft[student.id]?.score ?? ""} onChange={(event) => updateMarkDraft(student.id, { score: event.target.value })} /></td>
+            <td><input value={marksDraft[student.id]?.teacherComment ?? ""} onChange={(event) => updateMarkDraft(student.id, { teacherComment: event.target.value })} placeholder="Optional note" /></td>
+          </tr>)}
+          {!marksEntry && <tr><td colSpan={4} className="empty">Select an assigned assessment to enter marks.</td></tr>}
+          {marksEntry && marksEntry.students.length === 0 && <tr><td colSpan={4} className="empty">No active students are available for this assessment roster.</td></tr>}
+        </tbody>
+      </DataTable>
+    </section>}
+    {canManageAcademics && <div className="workflow-grid">
+      <form className="workflow-panel" onSubmit={(event) => void createExam(event)}>
+        <div><h4>Create Examination</h4><p className="panel-copy">Open an exam window for marks, review, and reports.</p></div>
+        <input placeholder="Exam name" value={examForm.name} onChange={(event) => setExamForm({ ...examForm, name: event.target.value })} required />
+        <select value={examForm.examinationType} onChange={(event) => setExamForm({ ...examForm, examinationType: event.target.value })}><option>End of Term</option><option>Mid Term</option><option>Mock Examination</option><option>Continuous Assessment</option></select>
+        <div className="two-field-row"><input type="date" value={examForm.startsAt} onChange={(event) => setExamForm({ ...examForm, startsAt: event.target.value })} /><input type="date" value={examForm.endsAt} onChange={(event) => setExamForm({ ...examForm, endsAt: event.target.value })} /></div>
+        <select value={examForm.status} onChange={(event) => setExamForm({ ...examForm, status: event.target.value })}>{["DRAFT", "OPEN", "MARKS_ENTRY", "UNDER_REVIEW"].map((status) => <option key={status}>{status}</option>)}</select>
+        <textarea placeholder="Description" value={examForm.description} onChange={(event) => setExamForm({ ...examForm, description: event.target.value })} />
+        <button type="submit">Create Exam</button>
+      </form>
+      <form className="workflow-panel" onSubmit={(event) => void createAssessment(event)}>
+        <div><h4>Create Assessment</h4><p className="panel-copy">Attach a subject, class, teacher, weighting, and pass mark.</p></div>
+        <select value={assessmentForm.examinationId} onChange={(event) => setAssessmentForm({ ...assessmentForm, examinationId: event.target.value })}><option value="">Select exam</option>{exams.map((exam) => <option key={exam.id} value={exam.id}>{exam.name}</option>)}</select>
+        <select value={assessmentForm.subjectId} onChange={(event) => setAssessmentForm({ ...assessmentForm, subjectId: event.target.value })}><option value="">Select subject</option>{config?.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select>
+        <select value={assessmentForm.classId} onChange={(event) => setAssessmentForm({ ...assessmentForm, classId: event.target.value, streamId: config?.classes.find((klass) => klass.id === event.target.value)?.streams[0]?.id ?? "" })}><option value="">Select class</option>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select>
+        <select value={assessmentForm.streamId} onChange={(event) => setAssessmentForm({ ...assessmentForm, streamId: event.target.value })}><option value="">All streams</option>{config?.classes.find((klass) => klass.id === assessmentForm.classId)?.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select>
+        <select value={assessmentForm.teacherId} onChange={(event) => setAssessmentForm({ ...assessmentForm, teacherId: event.target.value })}><option value="">No teacher assigned</option>{config?.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.staffId} - {teacher.firstName} {teacher.lastName}</option>)}</select>
+        <input placeholder="Assessment name" value={assessmentForm.name} onChange={(event) => setAssessmentForm({ ...assessmentForm, name: event.target.value })} required />
+        <div className="three-field-row"><input type="number" placeholder="Max" value={assessmentForm.maxScore} onChange={(event) => setAssessmentForm({ ...assessmentForm, maxScore: event.target.value })} /><input type="number" placeholder="Weight" value={assessmentForm.weight} onChange={(event) => setAssessmentForm({ ...assessmentForm, weight: event.target.value })} /><input type="number" placeholder="Pass" value={assessmentForm.passMark} onChange={(event) => setAssessmentForm({ ...assessmentForm, passMark: event.target.value })} /></div>
+        <button type="submit">Create Assessment</button>
+      </form>
+    </div>}
+    <DataTable label="Examinations"><thead><tr><th>Exam</th><th>Type</th><th>Status</th><th>Window</th><th>Assessments</th></tr></thead><tbody>
+      {exams.map((exam) => <tr key={exam.id}><td>{exam.name}</td><td>{exam.examinationType ?? "-"}</td><td><span className="pill">{exam.status ?? "-"}</span></td><td>{dateOnly(exam.startsAt)} - {dateOnly(exam.endsAt)}</td><td>{exam.assessments?.length ?? 0}</td></tr>)}
+      {exams.length === 0 && <tr><td colSpan={5} className="empty">No examinations created yet.</td></tr>}
+    </tbody></DataTable>
+    <DataTable label="Assessments"><thead><tr><th>Assessment</th><th>Subject</th><th>Status</th><th>Marks</th><th>Action</th></tr></thead><tbody>
+      {assessments.map((item) => <tr key={item.id}><td>{item.name}<br /><small>{item.examination?.name ?? "-"}</small></td><td>{item.subject?.name ?? "-"}</td><td><span className="pill">{item.status ?? "-"}</span></td><td>{item.marks?.length ?? 0}</td><td className="row-actions">{canEnterMarks ? <button type="button" className="ghost" onClick={() => void chooseMarksAssessment(item.id)}>Enter Marks</button> : canReviewMarks && item.status === "SUBMITTED" ? <><button type="button" onClick={() => void decideAssessment(item.id, "APPROVED")}>Approve</button><button className="ghost" type="button" onClick={() => void decideAssessment(item.id, "RETURNED")}>Return</button><button className="ghost" type="button" onClick={() => void decideAssessment(item.id, "PUBLISHED")}>Publish</button></> : "-"}</td></tr>)}
+      {assessments.length === 0 && <tr><td colSpan={5} className="empty">No assessments created yet.</td></tr>}
+    </tbody></DataTable>
+    <DataTable label="Report cards"><thead><tr><th>Student</th><th>Grade</th><th>Average</th><th>Status</th><th>DOS action</th></tr></thead><tbody>
       {cards.slice(0, 20).map((card) => <tr key={card.id}><td>{card.student?.firstName ?? ""} {card.student?.lastName ?? ""}</td><td>{card.grade}</td><td>{String(card.averageScore)}</td><td><span className="pill">{card.status}</span></td><td>{canPublishReports && card.status === "PREPARED" ? <button type="button" onClick={() => void publishReport(card.id)}>Approve & Publish</button> : "-"}</td></tr>)}
       {cards.length === 0 && <tr><td colSpan={5} className="empty">No report cards to display.</td></tr>}
-    </tbody></table></div>
+    </tbody></DataTable>
   </section>;
 }
 
 function TimetableAdminView({ api, config, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; setMessage: (message: string) => void }) {
   const [rows, setRows] = useState<any[]>([]);
+  const [form, setForm] = useState({ classId: "", streamId: "", subjectId: "", teacherId: "", room: "", dayOfWeek: "1", periodNumber: "1", startsAt: "08:00", endsAt: "08:40" });
   async function load() { setRows(asArray<any>(await api("/timetable"))); }
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Timetable unavailable.")); }, []);
+  useEffect(() => {
+    if (!config) return;
+    setForm((current) => ({
+      ...current,
+      classId: current.classId || config.classes[0]?.id || "",
+      streamId: current.streamId || config.classes[0]?.streams[0]?.id || "",
+      subjectId: current.subjectId || config.subjects[0]?.id || "",
+      teacherId: current.teacherId || config.teachers?.[0]?.id || ""
+    }));
+  }, [config]);
+  async function createEntry(event: React.FormEvent) {
+    event.preventDefault();
+    await api("/timetable", {
+      method: "POST",
+      body: JSON.stringify({
+        academicYearId: config?.school.currentAcademicYearId,
+        termId: config?.school.currentTermId,
+        classId: form.classId,
+        streamId: form.streamId || null,
+        subjectId: form.subjectId,
+        teacherId: form.teacherId,
+        room: form.room || null,
+        dayOfWeek: Number(form.dayOfWeek),
+        periodNumber: Number(form.periodNumber),
+        startsAt: form.startsAt,
+        endsAt: form.endsAt
+      })
+    });
+    setMessage("Timetable entry created.");
+    await load();
+  }
   const subjects = new Map((config?.subjects ?? []).map((subject) => [subject.id, subject.name]));
-  return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Timetable</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["Day", "Period", "Subject", "Time", "Room"]} rows={rows.map((row) => [`Day ${row.dayOfWeek}`, row.periodNumber, subjects.get(row.subjectId) ?? row.subjectId, `${row.startsAt}-${row.endsAt}`, row.room ?? "-"])} /></section>;
+  const teachers = new Map((config?.teachers ?? []).map((teacher) => [teacher.id, `${teacher.staffId} - ${teacher.firstName} ${teacher.lastName}`]));
+  const classes = new Map((config?.classes ?? []).map((klass) => [klass.id, klass.name]));
+  const currentClass = config?.classes.find((klass) => klass.id === form.classId);
+  return <section className="operation-panel wide-panel">
+    <div className="section-heading"><h3>Timetable</h3><button type="button" onClick={() => void load()}>Refresh</button></div>
+    <form className="workflow-form" onSubmit={(event) => void createEntry(event)}>
+      <select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value, streamId: config?.classes.find((klass) => klass.id === event.target.value)?.streams[0]?.id ?? "" })}><option value="">Class</option>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select>
+      <select value={form.streamId} onChange={(event) => setForm({ ...form, streamId: event.target.value })}><option value="">All streams</option>{currentClass?.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select>
+      <select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><option value="">Subject</option>{config?.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select>
+      <select value={form.teacherId} onChange={(event) => setForm({ ...form, teacherId: event.target.value })}><option value="">Teacher</option>{config?.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.staffId} - {teacher.firstName} {teacher.lastName}</option>)}</select>
+      <select value={form.dayOfWeek} onChange={(event) => setForm({ ...form, dayOfWeek: event.target.value })}>{["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, index) => <option key={day} value={String(index + 1)}>{day}</option>)}</select>
+      <input type="number" min="1" placeholder="Period" value={form.periodNumber} onChange={(event) => setForm({ ...form, periodNumber: event.target.value })} />
+      <input type="time" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} />
+      <input type="time" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} />
+      <input placeholder="Room" value={form.room} onChange={(event) => setForm({ ...form, room: event.target.value })} />
+      <button type="submit">Add Lesson</button>
+    </form>
+    <DataTable label="Timetable entries"><thead><tr><th>Day</th><th>Period</th><th>Class</th><th>Subject</th><th>Teacher</th><th>Time</th><th>Room</th></tr></thead><tbody>
+      {rows.map((row) => <tr key={row.id}><td>Day {row.dayOfWeek}</td><td>{row.periodNumber}</td><td>{classes.get(row.classId) ?? row.classId}</td><td>{subjects.get(row.subjectId) ?? row.subjectId}</td><td>{teachers.get(row.teacherId) ?? row.teacherId}</td><td>{row.startsAt}-{row.endsAt}</td><td>{row.room ?? "-"}</td></tr>)}
+      {rows.length === 0 && <tr><td colSpan={7} className="empty">No timetable entries yet.</td></tr>}
+    </tbody></DataTable>
+  </section>;
 }
 
 function InventoryAdminView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
@@ -1578,12 +2192,20 @@ function NotificationsAdminView({ api, setMessage }: { api: (path: string, init?
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Notifications & Announcements</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["Title", "Recipient", "Channel", "Status"]} rows={notifications.slice(0, 30).map((row) => [row.title, `${row.recipientType}${row.recipientId ? `:${row.recipientId}` : ""}`, row.channel, row.status])} /><FinanceTable headings={["Announcement", "Audience", "Priority", "Published"]} rows={announcements.map((row) => [row.title, row.audience, row.priority, dateOnly(row.publishAt)])} /></section>;
 }
 
+function DataTable({ label, compact = false, children }: { label: string; compact?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={compact ? "data-table compact" : "data-table"} role="region" aria-label={label} tabIndex={0}>
+      <table>{children}</table>
+    </div>
+  );
+}
+
 function InvoiceTable({ invoices }: { invoices: InvoiceRecord[] }) {
-  return <div className="table-scroll"><table><thead><tr><th>Invoice</th><th>Student</th><th>Expected</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td>{invoice.invoiceNo}</td><td>{invoice.student.admissionNo}<br /><small>{invoice.student.firstName} {invoice.student.lastName}</small></td><td>{ugx(invoice.amount)}</td><td>{ugx(invoice.amountPaid)}</td><td>{ugx(invoice.balance)}</td><td><span className="pill">{invoice.status}</span></td></tr>)}{invoices.length === 0 && <tr><td colSpan={6} className="empty">No invoices yet.</td></tr>}</tbody></table></div>;
+  return <DataTable label="Student invoices"><thead><tr><th>Invoice</th><th>Student</th><th>Expected</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td>{invoice.invoiceNo}</td><td>{invoice.student.admissionNo}<br /><small>{invoice.student.firstName} {invoice.student.lastName}</small></td><td>{ugx(invoice.amount)}</td><td>{ugx(invoice.amountPaid)}</td><td>{ugx(invoice.balance)}</td><td><span className="pill">{invoice.status}</span></td></tr>)}{invoices.length === 0 && <tr><td colSpan={6} className="empty">No invoices yet.</td></tr>}</tbody></DataTable>;
 }
 
 function FinanceTable({ headings, rows }: { headings: string[]; rows: Array<Array<string | number>> }) {
-  return <div className="table-scroll"><table><thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="empty">No records to display.</td></tr>}</tbody></table></div>;
+  return <DataTable label={headings.join(", ")}><thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="empty">No records to display.</td></tr>}</tbody></DataTable>;
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -1603,45 +2225,161 @@ function sectionsForUser(permissions: string[]) {
   return appSections.filter((section) => section.permissions.some((permission) => permissionSet.has(permission)));
 }
 
+function roleWorkspaceFor(persona: Persona, sections: AppSection[]): RoleWorkspace {
+  const available = new Map(sections.map((section) => [section.id, section]));
+  const actionViews = workspaceActionViews(persona, sections);
+  const focusViews = workspaceFocusViews(persona, sections);
+  const actionFor = (view: ActiveView) => available.get(view);
+  const focus = focusViews
+    .map((view) => actionFor(view))
+    .filter((section): section is AppSection => Boolean(section))
+    .map((section) => ({ label: section.group, value: section.label, view: section.id }));
+  const actions = actionViews
+    .map((view) => actionFor(view))
+    .filter((section): section is AppSection => Boolean(section))
+    .map((section) => ({ label: section.label, view: section.id }));
+  return {
+    focus: focus.length ? focus : sections.slice(0, 3).map((section) => ({ label: section.group, value: section.label, view: section.id })),
+    actions: actions.length ? actions : sections.slice(0, 5).map((section) => ({ label: section.label, view: section.id })),
+    ...workspaceCopy(persona)
+  };
+}
+
+function workspaceActionViews(persona: Persona, sections: AppSection[]): ActiveView[] {
+  const title = persona.title.toLowerCase();
+  if (title.includes("administrator")) return ["users", "dashboard", "approvals", "risk", "sync"];
+  if (title.includes("academic control")) return ["students", "school", "academics", "timetable", "notifications"];
+  if (title.includes("class teacher")) return ["academics", "students", "timetable", "attendance"];
+  if (title.includes("head teacher")) return ["dashboard", "academics", "approvals", "notifications"];
+  if (title.includes("bursar") || title.includes("accounts")) return ["finance", "budgets", "payroll", "approvals", "risk"];
+  if (title.includes("teacher")) return ["academics", "timetable", "students", "attendance"];
+  return sections.slice(0, 5).map((section) => section.id);
+}
+
+function workspaceFocusViews(persona: Persona, sections: AppSection[]): ActiveView[] {
+  const title = persona.title.toLowerCase();
+  if (title.includes("administrator")) return ["dashboard", "users", "audit"];
+  if (title.includes("academic control")) return ["school", "students", "academics"];
+  if (title.includes("class teacher")) return ["academics", "students", "timetable"];
+  if (title.includes("head teacher")) return ["dashboard", "academics", "approvals"];
+  if (title.includes("bursar") || title.includes("accounts")) return ["finance", "budgets", "payroll"];
+  if (title.includes("teacher")) return ["academics", "timetable", "attendance"];
+  return sections.slice(0, 3).map((section) => section.id);
+}
+
+function workspaceCopy(persona: Persona) {
+  const title = persona.title.toLowerCase();
+  if (title.includes("administrator")) {
+    return {
+      routines: ["Review users and role access.", "Check approvals, risks, sync conflicts, and audit activity.", "Confirm school setup is ready for the current term."],
+      alerts: ["Inactive staff with active responsibilities.", "Open sensitive sync conflicts.", "Unreviewed finance or approval exceptions."]
+    };
+  }
+  if (title.includes("academic control")) {
+    return {
+      routines: ["Review admissions and class placement.", "Maintain subjects, streams, terms, and grade boundaries.", "Approve assessments and publish final report cards."],
+      alerts: ["Marks awaiting review.", "Timetable conflicts or missing subject allocation.", "Students without current class or stream placement."]
+    };
+  }
+  if (title.includes("class teacher")) {
+    return {
+      routines: ["Review assigned learners.", "Prepare report cards for DOS approval.", "Track timetable and daily academic follow-up."],
+      alerts: ["Unprepared report cards.", "Missing marks in assigned class subjects.", "Students needing guardian or portal follow-up."]
+    };
+  }
+  if (title.includes("head teacher")) {
+    return {
+      routines: ["Scan school-wide dashboard and academic progress.", "Review approvals that need leadership attention.", "Coordinate communications for staff and families."],
+      alerts: ["Academic records stuck in review.", "High-priority announcements.", "Budget or risk items awaiting leadership context."]
+    };
+  }
+  if (title.includes("bursar") || title.includes("accounts")) {
+    return {
+      routines: ["Review fee collection and balances.", "Record payments and expenses.", "Track budgets, payroll, and finance approvals."],
+      alerts: ["Overdue invoices and low collection percentage.", "Budget utilization above threshold.", "Payroll or expense approvals waiting."]
+    };
+  }
+  if (title.includes("teacher")) {
+    return {
+      routines: ["Open timetable and assigned academic work.", "Enter marks for assigned assessments.", "Use staff attendance workflows when needed."],
+      alerts: ["Marks entry deadlines.", "Class or subject allocation changes.", "Attendance corrections needing follow-up."]
+    };
+  }
+  return {
+    routines: ["Open the sections available to your role.", "Keep assigned workflows up to date.", "Ask an administrator if a section is missing."],
+    alerts: ["Permissions determine visible tools.", "Some workflows may require approval.", "Offline changes should be synchronized regularly."]
+  };
+}
+
 function personaFor(roles: string[], permissions: string[]): Persona {
-  const roleText = roles.join(" ").toLowerCase();
+  const normalizedRoles = roles.map(normalizeRoleName);
+  const hasRole = (...names: string[]) => normalizedRoles.some((role) => names.includes(role));
   const permissionSet = new Set(permissions);
-  if (roleText.includes("dean of studies") || permissionSet.has(PermissionKey.AcademicSetupManage)) {
-    return {
-      kicker: "Dean of Studies",
-      title: "Academic Control Room",
-      summary: "Admissions, class setup, subject allocation, timetables, grading, examinations, and final report-card approval."
-    };
-  }
-  if (roleText.includes("class teacher") || permissionSet.has(PermissionKey.ReportCardsPrepare)) {
-    return {
-      kicker: "Class teacher",
-      title: "Class Teacher Workspace",
-      summary: "Review marks for assigned learners, prepare report cards, and send academic records to the DOS for final publishing."
-    };
-  }
-  if (roleText.includes("administrator")) {
+
+  if (hasRole("administrator")) {
     return {
       kicker: "Full command center",
       title: "School Administrator Console",
       summary: "School-wide oversight, users, governance approvals, finance visibility, risk, sync, and audit."
     };
   }
-  if (roleText.includes("head teacher")) {
+  if (hasRole("head teacher")) {
     return {
       kicker: "Academic leadership",
       title: "Head Teacher Workspace",
       summary: "Academic supervision, student progress, timetable coordination, approvals, and school communication."
     };
   }
-  if (roleText.includes("bursar") || roleText.includes("accountant") || permissionSet.has(PermissionKey.FinanceManage)) {
+  if (hasRole("bursar", "accountant")) {
     return {
       kicker: "Finance office",
       title: "Bursar & Accounts Workspace",
       summary: "Fees, invoices, payments, expenses, budgets, payroll records, and finance reporting."
     };
   }
-  if (roleText.includes("teacher") || permissionSet.has(PermissionKey.MarksEntry)) {
+  if (hasRole("dos", "dean of studies")) {
+    return {
+      kicker: "Dean of Studies",
+      title: "DOS Academic Control Room",
+      summary: "Admissions, class setup, subject allocation, timetables, grading, examinations, and final report-card approval."
+    };
+  }
+  if (hasRole("class teacher")) {
+    return {
+      kicker: "Class teacher",
+      title: "Class Teacher Workspace",
+      summary: "Review marks for assigned learners, prepare report cards, and send academic records to the DOS for final publishing."
+    };
+  }
+  if (hasRole("teacher")) {
+    return {
+      kicker: "Teaching workspace",
+      title: "Teacher Workspace",
+      summary: "Student lists, marks entry, academic records, timetable, and staff attendance access."
+    };
+  }
+  if (permissionSet.has(PermissionKey.AcademicSetupManage)) {
+    return {
+      kicker: "Dean of Studies",
+      title: "DOS Academic Control Room",
+      summary: "Admissions, class setup, subject allocation, timetables, grading, examinations, and final report-card approval."
+    };
+  }
+  if (permissionSet.has(PermissionKey.ReportCardsPrepare)) {
+    return {
+      kicker: "Class teacher",
+      title: "Class Teacher Workspace",
+      summary: "Review marks for assigned learners, prepare report cards, and send academic records to the DOS for final publishing."
+    };
+  }
+  if (permissionSet.has(PermissionKey.FinanceManage)) {
+    return {
+      kicker: "Finance office",
+      title: "Bursar & Accounts Workspace",
+      summary: "Fees, invoices, payments, expenses, budgets, payroll records, and finance reporting."
+    };
+  }
+  if (permissionSet.has(PermissionKey.MarksEntry)) {
     return {
       kicker: "Teaching workspace",
       title: "Teacher Workspace",
@@ -1653,6 +2391,10 @@ function personaFor(roles: string[], permissions: string[]): Persona {
     title: "Satelite Secondary Workspace",
     summary: "Your available sections are based on the permissions assigned by the school administrator."
   };
+}
+
+function normalizeRoleName(value: string) {
+  return value.toLowerCase().replaceAll("_", " ").replace(/\s+/g, " ").trim();
 }
 
 function isFinanceOnly(roles: string[], permissions: string[]) {
@@ -1669,6 +2411,7 @@ function isFinanceOnly(roles: string[], permissions: string[]) {
 function viewTitle(view: ActiveView) {
   return {
     dashboard: "Administrative Dashboard",
+    users: "Users & Roles",
     students: "Student Management",
     academics: "Academic Management",
     timetable: "Timetable",
@@ -1686,9 +2429,40 @@ function viewTitle(view: ActiveView) {
   }[view];
 }
 
+function roleNames(user: UserRecord) {
+  return user.roles.map((item) => item.role.name).filter(Boolean);
+}
+
+function summarizeRoles(users: UserRecord[]) {
+  const counts = new Map<string, number>();
+  for (const user of users) {
+    for (const role of roleNames(user)) {
+      counts.set(role, (counts.get(role) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts, ([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function formatRoleName(value: string) {
+  return value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function toggleId(values: string[], id: string) {
+  return values.includes(id) ? values.filter((value) => value !== id) : [...values, id];
+}
+
 function ugx(value?: number | string | null) {
   if (value === null || value === undefined || value === "") return "-";
   return `UGX ${Math.round(Number(value)).toLocaleString("en-UG")}`;
+}
+
+function printPage() {
+  window.print();
+}
+
+function positiveNumber(value: string) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
 function formatTime(value?: string | null) {
@@ -1697,6 +2471,10 @@ function formatTime(value?: string | null) {
 
 function dateOnly(value?: string | null) {
   return value ? new Date(value).toLocaleDateString() : "-";
+}
+
+function dateToIso(value: string) {
+  return new Date(`${value}T00:00:00.000Z`).toISOString();
 }
 
 function withIsoDates(body: Record<string, unknown>) {

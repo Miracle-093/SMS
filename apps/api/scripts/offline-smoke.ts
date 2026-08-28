@@ -51,8 +51,9 @@ async function main() {
     ]
   };
 
-  const firstPush = await post(`${url}/sync/push`, pushBody);
-  const duplicatePush = await post(`${url}/sync/push`, pushBody);
+  const token = await login(`${url}/auth/login`);
+  const firstPush = await post(`${url}/sync/push`, pushBody, token);
+  const duplicatePush = await post(`${url}/sync/push`, pushBody, token);
 
   const conflictPush = await post(`${url}/sync/push`, {
     deviceId,
@@ -69,9 +70,9 @@ async function main() {
         retryCount: 0
       }
     ]
-  });
+  }, token);
 
-  const pull = await post(`${url}/sync/pull`, { deviceId, schoolId: school.id, since: null });
+  const pull = await post(`${url}/sync/pull`, { deviceId, schoolId: school.id, since: null }, token);
   const conflict = await prisma.synchronizationConflict.findFirst({
     where: { schoolId: school.id, entityId: inventoryItem.id },
     orderBy: { createdAt: "desc" }
@@ -88,10 +89,20 @@ async function main() {
   }, null, 2));
 }
 
-async function post(url: string, body: unknown) {
+async function login(url: string) {
+  const response = await post(url, {
+    email: "admin@aethina.test",
+    password: "AdminPass123",
+    deviceId
+  });
+  if (!response.accessToken) throw new Error("Seeded admin login did not return an access token.");
+  return response.accessToken as string;
+}
+
+async function post(url: string, body: unknown, token?: string) {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body)
   });
   if (!response.ok) {

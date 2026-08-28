@@ -72,6 +72,17 @@ export const adminPasswordResetSchema = z.object({
   temporaryPassword: z.string().min(10)
 });
 
+export const adminUserCreateSchema = z.object({
+  email: z.string().email(),
+  displayName: z.string().min(2).max(120),
+  temporaryPassword: z.string().min(10),
+  roleIds: z.array(z.string().uuid()).min(1)
+});
+
+export const adminUserRolesSchema = z.object({
+  roleIds: z.array(z.string().uuid()).min(1)
+});
+
 export const schoolProfileSchema = z.object({
   name: z.string().min(2),
   code: z.string().min(2),
