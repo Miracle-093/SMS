@@ -19,9 +19,11 @@ import {
 } from "./offline-store.js";
 import { apiBaseUrl } from "./config.js";
 import { TeacherAttendanceKiosk } from "./teacher-attendance-kiosk.js";
+import { AppNotice, PermissionDeniedState, UserIdentity, errorForResponse, toUserFacingError, userMessage, type UserFacingError } from "./ui.js";
 import "./styles.css";
 
 const deviceId = "00000000-0000-4000-8000-000000000001";
+const demoMode = import.meta.env.VITE_DEMO_MODE === "true" || import.meta.env.DEV;
 
 type Session = {
   accessToken: string;
@@ -317,6 +319,7 @@ function App() {
   const [filters, setFilters] = useState({ search: "", classId: "", streamId: "", status: "", academicYearId: "" });
   const [online, setOnline] = useState(navigator.onLine);
   const [message, setMessage] = useState("Ready");
+  const [errorNotice, setErrorNotice] = useState<UserFacingError | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSync, setLastSync] = useState("Never");
   const visibleSections = useMemo(() => session ? sectionsForUser(session.user.permissions) : [], [session]);
@@ -324,6 +327,31 @@ function App() {
   const permissionSet = useMemo(() => new Set(session?.user.permissions ?? []), [session]);
   const canManageStudents = permissionSet.has(PermissionKey.AdmissionsManage);
   const financeOnly = Boolean(session && isFinanceOnly(session.user.roles, session.user.permissions));
+  const activeSection = appSections.find((section) => section.id === activeView);
+  const activeViewPermitted = !session || visibleSections.some((section) => section.id === activeView);
+  const schoolName = config?.school.name ?? "Satelite Secondary School";
+  const roleWorkspaceName = session ? workspaceIdentityFor(session.user.roles, session.user.permissions) : "Staff Workspace";
+
+  function showMessage(nextMessage: string) {
+    setErrorNotice(null);
+    setMessage(nextMessage);
+  }
+
+  function showError(error: unknown, fallback?: string) {
+    setMessage("");
+    setErrorNotice(toUserFacingError(error, fallback));
+  }
+
+  function selectView(view: ActiveView) {
+    if (visibleSections.some((section) => section.id === view)) {
+      setErrorNotice(null);
+      setActiveView(view);
+      return;
+    }
+    setErrorNotice({ message: "You do not have permission to access this section." });
+    const dashboard = visibleSections.find((section) => section.id === "dashboard");
+    setActiveView((dashboard ?? visibleSections[0])?.id ?? "dashboard");
+  }
 
   useEffect(() => {
     void refreshOfflineState();
@@ -355,7 +383,9 @@ function App() {
   useEffect(() => {
     if (!session || visibleSections.length === 0) return;
     if (!visibleSections.some((section) => section.id === activeView)) {
-      setActiveView(visibleSections[0].id);
+      const dashboard = visibleSections.find((section) => section.id === "dashboard");
+      setErrorNotice({ message: "You do not have permission to access this section." });
+      setActiveView((dashboard ?? visibleSections[0]).id);
     }
   }, [session, visibleSections, activeView]);
 
@@ -402,11 +432,11 @@ function App() {
       setConfig(configResponse);
       setStudents(studentResponse);
       setOnline(true);
-      setMessage("Data refreshed");
+      showMessage("Data refreshed");
       await refreshOfflineState();
     } catch (error) {
       setOnline(false);
-      setMessage(`Offline mode: ${error instanceof Error ? error.message : "API unavailable"}`);
+      showMessage(`Offline mode: ${userMessage(error, "API unavailable")}`);
       await refreshOfflineState();
     }
   }
@@ -430,7 +460,7 @@ function App() {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}`, ...(init?.headers ?? {}) }
     });
     if (!response.ok) {
-      throw new Error(await response.text());
+      throw errorForResponse(response.status, await response.text());
     }
     return response.json();
   }
@@ -453,7 +483,7 @@ function App() {
     if (!session) return;
     const registration = { ...toRegistration(form, session.user.schoolId), id: selected?.id };
     if (!registration.firstName || !registration.lastName || !registration.currentClassId || !registration.guardianPhone) {
-      setMessage("Please complete required student and guardian fields.");
+      showMessage("Please complete required student and guardian fields.");
       return;
     }
     try {
@@ -463,13 +493,13 @@ function App() {
             method: selected ? "PUT" : "POST",
             body: JSON.stringify(registration)
           });
-      setMessage(selected ? "Student updated" : `Student registered. Temporary portal password: ${result.portalTemporaryPassword ?? "created offline"}`);
+      showMessage(selected ? "Student updated" : `Student registered. Temporary portal password: ${result.portalTemporaryPassword ?? "created offline"}`);
       setForm(emptyForm);
       setSelected(null);
       await refreshAll();
     } catch {
       await saveOffline(registration, selected ? "UPDATE" : "CREATE");
-      setMessage("API unavailable. Student saved locally and queued for synchronization.");
+      showMessage("API unavailable. Student saved locally and queued for synchronization.");
     }
   }
 
@@ -513,7 +543,7 @@ function App() {
     if (!session) return;
     const pending = await readPendingChanges();
     if (pending.length === 0) {
-      setMessage("Nothing pending synchronization.");
+      showMessage("Nothing pending synchronization.");
       return;
     }
     try {
@@ -536,16 +566,16 @@ function App() {
         body: JSON.stringify({ deviceId, schoolId: session.user.schoolId, since: lastSync === "Never" ? null : new Date(lastSync).toISOString() })
       });
       await refreshAll();
-      setMessage(remaining.length ? `${remaining.length} record(s) still need review.` : "Pending students synchronized successfully.");
+      showMessage(remaining.length ? `${remaining.length} record(s) still need review.` : "Pending students synchronized successfully.");
     } catch (error) {
       setOnline(false);
-      setMessage(`Synchronization failed: ${error instanceof Error ? error.message : "API unavailable"}`);
+      showError(error, "Synchronization failed. Please try again when the API is available.");
     }
   }
 
   async function resetPortal(student: Student) {
     const result = await api(`/students/${student.id}/reset-portal-credentials`, { method: "POST" });
-    setMessage(`Portal reset for ${student.admissionNo}. Temporary password: ${result.temporaryPassword}`);
+    showMessage(`Portal reset for ${student.admissionNo}. Temporary password: ${result.temporaryPassword}`);
     await refreshAll();
   }
 
@@ -567,14 +597,15 @@ function App() {
     <main className="app-shell">
       <aside className="sidebar">
         <div>
-          <p className="eyebrow">Satelite Secondary</p>
+          <p className="eyebrow">{schoolName}</p>
           <h1>Administration</h1>
+          <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} />
         </div>
         <nav>
           {groupedSections.map((group) => (
             <div className="nav-group" key={group.group}>
               <span className="nav-group-label">{group.group}</span>
-              {group.sections.map((section) => <button key={section.id} className={activeView === section.id ? "active" : ""} onClick={() => setActiveView(section.id)}>{section.label}</button>)}
+              {group.sections.map((section) => <button key={section.id} className={activeView === section.id ? "active" : ""} onClick={() => selectView(section.id)}>{section.label}</button>)}
             </div>
           ))}
         </nav>
@@ -584,17 +615,19 @@ function App() {
       <section className="workspace">
         <header className="mobile-admin-bar">
           <div>
-            <p className="eyebrow">Satelite Secondary</p>
+            <p className="eyebrow">{schoolName}</p>
             <strong>{session.user.displayName}</strong>
+            <span>{roleWorkspaceName}</span>
           </div>
           <button className="ghost" onClick={logout}>Logout</button>
         </header>
         <header className="topbar">
           <div>
-            <p className="eyebrow">{config?.school.name ?? "School workspace"}</p>
+            <p className="eyebrow">{schoolName}</p>
             <h2>{viewTitle(activeView)}</h2>
             {persona && <p className="role-caption">{persona.title} - {persona.summary}</p>}
           </div>
+          <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} />
           <div className="status-strip">
             <span className={online ? "status online" : "status offline"}>{online ? "Online" : "Offline"}</span>
             <span>{pendingCount} pending</span>
@@ -606,15 +639,15 @@ function App() {
         <div className="mobile-section-nav">
           <label>
             Section
-            <select value={activeView} onChange={(event) => setActiveView(event.target.value as ActiveView)}>
+            <select value={activeView} onChange={(event) => selectView(event.target.value as ActiveView)}>
               {visibleSections.map((section) => <option key={section.id} value={section.id}>{section.label}</option>)}
             </select>
           </label>
         </div>
 
-        {persona && activeView === "dashboard" && <RoleHomeCard persona={persona} sections={visibleSections} setActiveView={setActiveView} />}
+        {persona && activeView === "dashboard" && <RoleHomeCard persona={persona} sections={visibleSections} setActiveView={selectView} />}
 
-        {message && <div className="notice" role="status" aria-live="polite" aria-atomic="true">{message}</div>}
+        <AppNotice message={message} error={errorNotice} />
 
         <section className="config-band">
           <div><strong>Academic year</strong><span>{config?.academicYears.find((year) => year.id === config.school.currentAcademicYearId)?.name ?? "Not set"}</span></div>
@@ -632,34 +665,38 @@ function App() {
           )}
         </section>
 
-        {activeView === "dashboard" ? (
-          <DashboardView api={api} session={session} online={online} pendingCount={pendingCount} lastSync={lastSync} setMessage={setMessage} />
+        {!activeViewPermitted ? (
+          <PermissionDeniedState sectionName={activeSection?.label} />
+        ) : visibleSections.length === 0 ? (
+          <PermissionDeniedState sectionName="No sections available" />
+        ) : activeView === "dashboard" ? (
+          <DashboardView api={api} session={session} online={online} pendingCount={pendingCount} lastSync={lastSync} setMessage={showMessage} />
         ) : activeView === "academics" ? (
-          <AcademicsAdminView api={api} config={config} session={session} setMessage={setMessage} />
+          <AcademicsAdminView api={api} config={config} session={session} setMessage={showMessage} />
         ) : activeView === "timetable" ? (
-          <TimetableAdminView api={api} config={config} setMessage={setMessage} />
+          <TimetableAdminView api={api} config={config} setMessage={showMessage} />
         ) : activeView === "finance" ? (
-          <FinanceView api={api} config={config} students={visibleStudents} session={session} online={online} refreshOfflineState={refreshOfflineState} setMessage={setMessage} />
+          <FinanceView api={api} config={config} students={visibleStudents} session={session} online={online} refreshOfflineState={refreshOfflineState} setMessage={showMessage} />
         ) : activeView === "budgets" ? (
-          <BudgetsView api={api} config={config} session={session} online={online} refreshOfflineState={refreshOfflineState} setMessage={setMessage} />
+          <BudgetsView api={api} config={config} session={session} online={online} refreshOfflineState={refreshOfflineState} setMessage={showMessage} />
         ) : activeView === "inventory" ? (
-          <InventoryAdminView api={api} setMessage={setMessage} />
+          <InventoryAdminView api={api} setMessage={showMessage} />
         ) : activeView === "payroll" ? (
-          <PayrollAdminView api={api} setMessage={setMessage} />
+          <PayrollAdminView api={api} setMessage={showMessage} />
         ) : activeView === "notifications" ? (
-          <NotificationsAdminView api={api} setMessage={setMessage} />
+          <NotificationsAdminView api={api} setMessage={showMessage} />
         ) : activeView === "approvals" ? (
-          <ApprovalsView api={api} setMessage={setMessage} />
+          <ApprovalsView api={api} setMessage={showMessage} />
         ) : activeView === "users" ? (
-          <UsersRolesView api={api} session={session} setMessage={setMessage} />
+          <UsersRolesView api={api} session={session} setMessage={showMessage} />
         ) : activeView === "risk" ? (
-          <RiskAlertsView api={api} setMessage={setMessage} />
+          <RiskAlertsView api={api} setMessage={showMessage} />
         ) : activeView === "school" ? (
-          <SchoolConfigView config={config} api={api} refreshAll={refreshAll} setMessage={setMessage} />
+          <SchoolConfigView config={config} api={api} refreshAll={refreshAll} setMessage={showMessage} />
         ) : activeView === "attendance" ? (
-          <AttendanceView api={api} setMessage={setMessage} />
+          <AttendanceView api={api} setMessage={showMessage} />
         ) : activeView === "sync" ? (
-          <SyncReviewView api={api} setMessage={setMessage} />
+          <SyncReviewView api={api} setMessage={showMessage} />
         ) : activeView === "audit" ? (
           <AuditView api={api} />
         ) : <>
@@ -742,8 +779,8 @@ function App() {
 }
 
 function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) => Promise<void> }) {
-  const [email, setEmail] = useState("admin@aethina.test");
-  const [password, setPassword] = useState("AdminPass123");
+  const [email, setEmail] = useState(demoMode ? "admin@aethina.test" : "");
+  const [password, setPassword] = useState(demoMode ? "AdminPass123" : "");
   const [error, setError] = useState("");
   return (
     <main className="login-screen">
@@ -751,9 +788,9 @@ function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) =
         <p className="eyebrow">Satelite Secondary</p>
         <h1>Sign in</h1>
         <p className="login-copy">Admin, bursar, teacher, attendance kiosk, finance, academics, inventory, payroll, approvals, and offline sync.</p>
-        <div className="demo-strip">Demo admin: admin@aethina.test / AdminPass123</div>
-        <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-        <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        {demoMode && <div className="demo-strip">Demo admin: admin@aethina.test / AdminPass123</div>}
+        <label>Email<input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+        <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <button type="submit">Login</button>
       </form>
@@ -776,8 +813,8 @@ function RoleHomeCard({ persona, sections, setActiveView }: { persona: Persona; 
         </div>
       </div>
 
-      <div className="role-dashboard-grid">
-        <section className="role-focus-panel">
+      <div className="role-workspace-compact">
+        <section className="role-focus-panel role-primary-panel">
           <h4>Primary Workspace</h4>
           <div className="role-focus-list">
             {workspace.focus.map((item) => (
@@ -788,14 +825,14 @@ function RoleHomeCard({ persona, sections, setActiveView }: { persona: Persona; 
             ))}
           </div>
         </section>
-        <section className="role-focus-panel">
-          <h4>Daily Routine</h4>
+        <details className="role-focus-panel role-note-panel">
+          <summary>Daily Routine</summary>
           <ul className="role-check-list">{workspace.routines.map((item) => <li key={item}>{item}</li>)}</ul>
-        </section>
-        <section className="role-focus-panel">
-          <h4>Watch Points</h4>
+        </details>
+        <details className="role-focus-panel role-note-panel">
+          <summary>Watch Points</summary>
           <ul className="role-check-list attention">{workspace.alerts.map((item) => <li key={item}>{item}</li>)}</ul>
-        </section>
+        </details>
       </div>
     </section>
   );
@@ -805,10 +842,14 @@ function StudentProfile({ student, canResetPortal, onReset }: { student: Student
   const guardian = student.guardians?.[0];
   return (
     <div className="profile">
-      <div className="avatar">{student.firstName.slice(0, 1)}{student.lastName.slice(0, 1)}</div>
-      <h3>{student.firstName} {student.middleName} {student.lastName}</h3>
-      <p>{student.admissionNo}</p>
-      <dl>
+      <div className="profile-header">
+        <div className="avatar">{student.firstName.slice(0, 1)}{student.lastName.slice(0, 1)}</div>
+        <div>
+          <h3>{student.firstName} {student.middleName} {student.lastName}</h3>
+          <p>{student.admissionNo}</p>
+        </div>
+      </div>
+      <dl className="profile-details">
         <dt>Guardian</dt><dd>{guardian?.guardian.fullName ?? "-"}</dd>
         <dt>Relationship</dt><dd>{guardian?.relationship ?? "-"}</dd>
         <dt>Phone</dt><dd>{guardian?.guardian.phone ?? "-"}</dd>
@@ -832,28 +873,40 @@ function StudentForm({ form, setForm, config, onSubmit }: { form: RegistrationFo
   const update = (key: keyof RegistrationForm, value: string) => setForm({ ...form, [key]: value });
   return (
     <form className="student-form" onSubmit={onSubmit}>
-      <label>Admission No.<input value={form.admissionNo} onChange={(event) => update("admissionNo", event.target.value)} placeholder="Auto if blank" /></label>
-      <label>First name<input required value={form.firstName} onChange={(event) => update("firstName", event.target.value)} /></label>
-      <label>Middle name<input value={form.middleName} onChange={(event) => update("middleName", event.target.value)} /></label>
-      <label>Last name<input required value={form.lastName} onChange={(event) => update("lastName", event.target.value)} /></label>
-      <label>Gender<select value={form.gender} onChange={(event) => update("gender", event.target.value)}><option>FEMALE</option><option>MALE</option><option>OTHER</option></select></label>
-      <label>Date of birth<input type="date" value={form.dateOfBirth} onChange={(event) => update("dateOfBirth", event.target.value)} /></label>
-      <label>Academic year<select value={form.currentAcademicYearId} onChange={(event) => update("currentAcademicYearId", event.target.value)}>{config?.academicYears.map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}</select></label>
-      <label>Class<select required value={form.currentClassId} onChange={(event) => update("currentClassId", event.target.value)}>{config?.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label>Stream<select value={form.currentStreamId} onChange={(event) => update("currentStreamId", event.target.value)}><option value="">None</option>{selectedClass?.streams.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label>Admission date<input type="date" value={form.admissionDate} onChange={(event) => update("admissionDate", event.target.value)} /></label>
-      <label>Status<select value={form.status} onChange={(event) => update("status", event.target.value)}><option>ACTIVE</option><option>APPLICANT</option><option>INACTIVE</option><option>GRADUATED</option></select></label>
-      <label>Previous school<input value={form.previousSchool} onChange={(event) => update("previousSchool", event.target.value)} /></label>
-      <label>Guardian name<input required value={form.guardianFullName} onChange={(event) => update("guardianFullName", event.target.value)} /></label>
-      <label>Relationship<input required value={form.guardianRelationship} onChange={(event) => update("guardianRelationship", event.target.value)} /></label>
-      <label>Guardian phone<input required value={form.guardianPhone} onChange={(event) => update("guardianPhone", event.target.value)} /></label>
-      <label>Guardian email<input type="email" value={form.guardianEmail} onChange={(event) => update("guardianEmail", event.target.value)} /></label>
-      <label>Guardian address<input value={form.guardianAddress} onChange={(event) => update("guardianAddress", event.target.value)} /></label>
-      <label>Emergency contact<input required value={form.emergencyContact} onChange={(event) => update("emergencyContact", event.target.value)} /></label>
-      <label>Photo URL<input value={form.photoUrl} onChange={(event) => update("photoUrl", event.target.value)} /></label>
-      <label>Document URLs<input value={form.supportingDocuments} onChange={(event) => update("supportingDocuments", event.target.value)} placeholder="Comma-separated URLs" /></label>
-      <label className="wide">Medical notes<textarea value={form.medicalNotes} onChange={(event) => update("medicalNotes", event.target.value)} /></label>
-      <label className="wide">Notes<textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label>
+      <fieldset className="student-form-section">
+        <legend>Student Details</legend>
+        <label>Admission No.<input value={form.admissionNo} onChange={(event) => update("admissionNo", event.target.value)} placeholder="Auto if blank" /></label>
+        <label>First name<input required value={form.firstName} onChange={(event) => update("firstName", event.target.value)} /></label>
+        <label>Middle name<input value={form.middleName} onChange={(event) => update("middleName", event.target.value)} /></label>
+        <label>Last name<input required value={form.lastName} onChange={(event) => update("lastName", event.target.value)} /></label>
+        <label>Gender<select value={form.gender} onChange={(event) => update("gender", event.target.value)}><option>FEMALE</option><option>MALE</option><option>OTHER</option></select></label>
+        <label>Date of birth<input type="date" value={form.dateOfBirth} onChange={(event) => update("dateOfBirth", event.target.value)} /></label>
+      </fieldset>
+      <fieldset className="student-form-section">
+        <legend>Placement</legend>
+        <label>Academic year<select value={form.currentAcademicYearId} onChange={(event) => update("currentAcademicYearId", event.target.value)}>{config?.academicYears.map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}</select></label>
+        <label>Class<select required value={form.currentClassId} onChange={(event) => update("currentClassId", event.target.value)}>{config?.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>Stream<select value={form.currentStreamId} onChange={(event) => update("currentStreamId", event.target.value)}><option value="">None</option>{selectedClass?.streams.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>Admission date<input type="date" value={form.admissionDate} onChange={(event) => update("admissionDate", event.target.value)} /></label>
+        <label>Status<select value={form.status} onChange={(event) => update("status", event.target.value)}><option>ACTIVE</option><option>APPLICANT</option><option>INACTIVE</option><option>GRADUATED</option></select></label>
+        <label>Previous school<input value={form.previousSchool} onChange={(event) => update("previousSchool", event.target.value)} /></label>
+      </fieldset>
+      <fieldset className="student-form-section">
+        <legend>Guardian & Contacts</legend>
+        <label>Guardian name<input required value={form.guardianFullName} onChange={(event) => update("guardianFullName", event.target.value)} /></label>
+        <label>Relationship<input required value={form.guardianRelationship} onChange={(event) => update("guardianRelationship", event.target.value)} /></label>
+        <label>Guardian phone<input required value={form.guardianPhone} onChange={(event) => update("guardianPhone", event.target.value)} /></label>
+        <label>Guardian email<input type="email" value={form.guardianEmail} onChange={(event) => update("guardianEmail", event.target.value)} /></label>
+        <label>Guardian address<input value={form.guardianAddress} onChange={(event) => update("guardianAddress", event.target.value)} /></label>
+        <label>Emergency contact<input required value={form.emergencyContact} onChange={(event) => update("emergencyContact", event.target.value)} /></label>
+      </fieldset>
+      <fieldset className="student-form-section wide">
+        <legend>Records</legend>
+        <label>Photo URL<input value={form.photoUrl} onChange={(event) => update("photoUrl", event.target.value)} /></label>
+        <label>Document URLs<input value={form.supportingDocuments} onChange={(event) => update("supportingDocuments", event.target.value)} placeholder="Comma-separated URLs" /></label>
+        <label>Medical notes<textarea value={form.medicalNotes} onChange={(event) => update("medicalNotes", event.target.value)} /></label>
+        <label>Notes<textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label>
+      </fieldset>
       <button type="submit">Save Student</button>
     </form>
   );
@@ -905,7 +958,7 @@ function SchoolConfigView({ config, api, refreshAll, setMessage }: { config: Sch
       setMessage(success);
       await refreshAll();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Configuration update failed.");
+      setMessage(userMessage(error, "Configuration update failed."));
     }
   }
 
@@ -1029,7 +1082,7 @@ function AttendanceView({ api, setMessage }: { api: (path: string, init?: Reques
   }
 
   useEffect(() => {
-    void load().catch((error) => setMessage(error instanceof Error ? error.message : "Could not load attendance."));
+    void load().catch((error) => setMessage(userMessage(error, "Could not load attendance.")));
   }, [date]);
 
   async function review(id: string, action: "approve" | "reject") {
@@ -1103,7 +1156,7 @@ function SyncReviewView({ api, setMessage }: { api: (path: string, init?: Reques
   }
 
   useEffect(() => {
-    void load().catch((error) => setMessage(error instanceof Error ? error.message : "Could not load sync conflicts."));
+    void load().catch((error) => setMessage(userMessage(error, "Could not load sync conflicts.")));
   }, []);
 
   async function decide(id: string, action: "resolve" | "reject") {
@@ -1159,14 +1212,21 @@ function AuditView({ api }: { api: (path: string, init?: RequestInit) => Promise
         <button type="button" onClick={() => void load()}>Search</button>
       </div>
       <DataTable label="Audit log events">
-        <thead><tr><th>Time</th><th>Action</th><th>Entity</th><th>Actor</th></tr></thead>
+        <thead><tr><th>Time</th><th>Event</th><th>Module</th><th>Actor</th></tr></thead>
         <tbody>
           {records.map((record) => (
             <tr key={record.id}>
               <td>{new Date(record.createdAt).toLocaleString()}</td>
-              <td>{record.action}</td>
-              <td>{record.entityType}<br /><small>{record.entityId}</small></td>
-              <td>{record.actorId ?? "-"}</td>
+              <td>
+                {formatAuditAction(record.action)}
+                <details className="row-details">
+                  <summary>Details</summary>
+                  <small>Action: {record.action}</small><br />
+                  <small>Record: {record.entityId}</small>
+                </details>
+              </td>
+              <td>{formatEntityName(record.entityType)}</td>
+              <td>{record.actorId ? "Staff user" : "System"}</td>
             </tr>
           ))}
           {records.length === 0 && <tr><td colSpan={4} className="empty">No audit events match the current filters.</td></tr>}
@@ -1180,7 +1240,7 @@ function ConfigList({ items }: { items: string[] }) {
   return (
     <ul className="config-list">
       {items.slice(0, 8).map((item) => <li key={item}>{item}</li>)}
-      {items.length === 0 && <li>No records yet.</li>}
+      {items.length === 0 && <li>No setup records have been added.</li>}
     </ul>
   );
 }
@@ -1245,54 +1305,62 @@ function fromStudent(student: Student, config: SchoolConfig | null): Registratio
 
 function DashboardView({ api, session, online, pendingCount, lastSync, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; session: Session; online: boolean; pendingCount: number; lastSync: string; setMessage: (message: string) => void }) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [summaryState, setSummaryState] = useState<MetricState>("loading");
   const [alerts, setAlerts] = useState<Array<{ type: string; title: string; severity?: string; createdAt: string }>>([]);
   const [activity, setActivity] = useState<AuditRecord[]>([]);
 
   async function load() {
-    const [nextSummary, nextAlerts, nextActivity] = await Promise.all([
-      api("/dashboard/summary"),
-      api("/dashboard/alerts"),
-      api("/dashboard/activity")
-    ]);
-    setSummary(nextSummary);
-    setAlerts(nextAlerts);
-    setActivity(nextActivity);
+    setSummaryState(summary ? "ready" : "loading");
+    try {
+      const [nextSummary, nextAlerts, nextActivity] = await Promise.all([
+        api("/dashboard/summary"),
+        api("/dashboard/alerts"),
+        api("/dashboard/activity")
+      ]);
+      setSummary(nextSummary);
+      setAlerts(nextAlerts);
+      setActivity(nextActivity);
+      setSummaryState("ready");
+    } catch (error) {
+      setSummaryState("unavailable");
+      setMessage(userMessage(error, "Dashboard unavailable."));
+    }
   }
 
   useEffect(() => {
-    void load().catch((error) => setMessage(error instanceof Error ? error.message : "Dashboard unavailable."));
+    void load();
   }, []);
 
   const financeOnly = isFinanceOnly(session.user.roles, session.user.permissions);
   const allCards = [
-    ["Active students", summary?.activeStudents],
-    ["Teachers", summary?.teachers],
-    ["Expected fees", ugx(summary?.expectedFees)],
-    ["Fees collected", ugx(summary?.collectedFees)],
-    ["Outstanding fees", ugx(summary?.outstandingFees)],
-    ["Collection rate", summary?.collectionPercentage === null || summary?.collectionPercentage === undefined ? "-" : `${summary.collectionPercentage}%`],
-    ["Teacher attendance today", summary?.attendanceToday],
-    ["Budget approvals", summary?.pendingBudgetApprovals],
-    ["Expense approvals", summary?.pendingExpenseApprovals],
-    ["Sync conflicts", summary?.unresolvedSyncConflicts],
-    ["Risk alerts", summary?.suspiciousFinancialActivities],
-    ["Low stock", summary?.lowStockItems],
-    ["Marks awaiting approval", summary?.marksAwaitingApproval],
-    ["Published report cards", summary?.publishedReportCards],
-    ["Active payroll runs", summary?.activePayrollRuns],
-    ["Failed notifications", summary?.failedNotifications],
-    ["Portal logins today", summary?.portalLoginsToday]
+    ["Active students", countMetric(summary?.activeStudents, summaryState)],
+    ["Teachers", countMetric(summary?.teachers, summaryState)],
+    ["Expected fees", moneyMetric(summary?.expectedFees, summaryState)],
+    ["Fees collected", moneyMetric(summary?.collectedFees, summaryState)],
+    ["Outstanding fees", moneyMetric(summary?.outstandingFees, summaryState)],
+    ["Collection rate", percentMetric(summary?.collectionPercentage, summaryState)],
+    ["Teacher attendance today", countMetric(summary?.attendanceToday, summaryState)],
+    ["Budget approvals", countMetric(summary?.pendingBudgetApprovals, summaryState)],
+    ["Expense approvals", countMetric(summary?.pendingExpenseApprovals, summaryState)],
+    ["Sync conflicts", countMetric(summary?.unresolvedSyncConflicts, summaryState)],
+    ["Risk alerts", countMetric(summary?.suspiciousFinancialActivities, summaryState)],
+    ["Low stock", countMetric(summary?.lowStockItems, summaryState)],
+    ["Marks awaiting approval", countMetric(summary?.marksAwaitingApproval, summaryState)],
+    ["Published report cards", countMetric(summary?.publishedReportCards, summaryState)],
+    ["Active payroll runs", countMetric(summary?.activePayrollRuns, summaryState)],
+    ["Failed notifications", countMetric(summary?.failedNotifications, summaryState)],
+    ["Portal logins today", countMetric(summary?.portalLoginsToday, summaryState)]
   ];
   const financeCards = [
-    ["Expected fees", ugx(summary?.expectedFees)],
-    ["Fees collected", ugx(summary?.collectedFees)],
-    ["Outstanding fees", ugx(summary?.outstandingFees)],
-    ["Collection rate", summary?.collectionPercentage === null || summary?.collectionPercentage === undefined ? "-" : `${summary.collectionPercentage}%`],
-    ["Discounts/Waivers", ugx(summary?.discountsWaivers)],
-    ["Expenses", ugx(summary?.expenses)],
-    ["Net cash movement", ugx(summary?.netCashMovement)],
-    ["Budget approvals", summary?.pendingBudgetApprovals],
-    ["Active payroll runs", summary?.activePayrollRuns]
+    ["Expected fees", moneyMetric(summary?.expectedFees, summaryState)],
+    ["Fees collected", moneyMetric(summary?.collectedFees, summaryState)],
+    ["Outstanding fees", moneyMetric(summary?.outstandingFees, summaryState)],
+    ["Collection rate", percentMetric(summary?.collectionPercentage, summaryState)],
+    ["Discounts/Waivers", moneyMetric(summary?.discountsWaivers, summaryState)],
+    ["Expenses", moneyMetric(summary?.expenses, summaryState)],
+    ["Net cash movement", moneyMetric(summary?.netCashMovement, summaryState)],
+    ["Budget approvals", countMetric(summary?.pendingBudgetApprovals, summaryState)],
+    ["Active payroll runs", countMetric(summary?.activePayrollRuns, summaryState)]
   ];
   const cards = financeOnly ? financeCards : allCards;
 
@@ -1300,15 +1368,15 @@ function DashboardView({ api, session, online, pendingCount, lastSync, setMessag
     <section className="dashboard-grid">
       {!online && <div className="notice stale">Offline. Figures are from the last synchronized cache where available. Last sync: {lastSync}. Pending local changes: {pendingCount}.</div>}
       <section className="metric-grid wide-panel">
-        {cards.map(([label, value]) => <div className="metric" key={label}><span>{label}</span><strong>{value ?? "-"}</strong></div>)}
+        {cards.map(([label, value]) => <div className={value === "Unavailable" ? "metric muted-metric" : "metric"} key={label}><span>{label}</span><strong>{value}</strong></div>)}
       </section>
       <section className="operation-panel">
         <div className="section-heading"><h3>Finance Overview</h3><button type="button" onClick={() => void load()}>Refresh</button></div>
         <dl className="finance-dl">
-          <dt>Discounts/Waivers</dt><dd>{ugx(summary?.discountsWaivers)}</dd>
-          <dt>Expenses</dt><dd>{ugx(summary?.expenses)}</dd>
-          <dt>Net cash movement</dt><dd>{ugx(summary?.netCashMovement)}</dd>
-          <dt>As of</dt><dd>{summary ? new Date(summary.asOf).toLocaleString() : "-"}</dd>
+          <dt>Discounts/Waivers</dt><dd>{moneyMetric(summary?.discountsWaivers, summaryState)}</dd>
+          <dt>Expenses</dt><dd>{moneyMetric(summary?.expenses, summaryState)}</dd>
+          <dt>Net cash movement</dt><dd>{moneyMetric(summary?.netCashMovement, summaryState)}</dd>
+          <dt>As of</dt><dd>{summary ? new Date(summary.asOf).toLocaleString() : stateLabel(summaryState)}</dd>
         </dl>
       </section>
       {!financeOnly && <section className="operation-panel">
@@ -1362,7 +1430,7 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
   }
 
   useEffect(() => {
-    void load().catch((error) => setMessage(error instanceof Error ? error.message : "Finance data unavailable."));
+    void load().catch((error) => setMessage(userMessage(error, "Finance data unavailable.")));
   }, []);
 
   useEffect(() => {
@@ -1546,7 +1614,7 @@ function BudgetsView({ api, config, session, online, refreshOfflineState, setMes
     setBudgets(nextRows);
     setRequest((current) => ({ ...current, budgetId: current.budgetId || nextRows[0]?.id || "" }));
   }
-  useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Budgets unavailable.")); }, []);
+  useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Budgets unavailable."))); }, []);
   async function createBudget(event: React.FormEvent) {
     event.preventDefault();
     const amount = positiveNumber(form.amount);
@@ -1611,7 +1679,7 @@ function BudgetsView({ api, config, session, online, refreshOfflineState, setMes
 function ApprovalsView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
   const [rows, setRows] = useState<ApprovalRecord[]>([]);
   async function load() { setRows(asArray<ApprovalRecord>(await api("/approvals"))); }
-  useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Approvals unavailable.")); }, []);
+  useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Approvals unavailable."))); }, []);
   async function decide(id: string, decision: string) {
     await api(`/approvals/${id}/decision`, { method: "POST", body: JSON.stringify({ decision, comment: `Desktop ${decision.toLowerCase()} decision` }) });
     setMessage(`Approval ${decision.toLowerCase().replaceAll("_", " ")}.`);
@@ -1639,7 +1707,7 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
   }
 
   useEffect(() => {
-    void load().catch((error) => setMessage(error instanceof Error ? error.message : "Users unavailable."));
+    void load().catch((error) => setMessage(userMessage(error, "Users unavailable.")));
   }, []);
 
   const filteredUsers = users.filter((user) => {
@@ -1862,7 +1930,7 @@ function RoleChecklist({ roles, selected, onChange }: { roles: RoleOption[]; sel
 function RiskAlertsView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
   const [rows, setRows] = useState<RiskAlertRecord[]>([]);
   async function load() { setRows(asArray<RiskAlertRecord>(await api("/risk-alerts"))); }
-  useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Risk alerts unavailable.")); }, []);
+  useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Risk alerts unavailable."))); }, []);
   async function review(id: string, status: string) {
     await api(`/risk-alerts/${id}/review`, { method: "POST", body: JSON.stringify({ status, notes: `Reviewed in desktop as ${status}` }) });
     setMessage(`Risk alert marked ${status.toLowerCase().replaceAll("_", " ")}.`);
@@ -1973,7 +2041,7 @@ function AcademicsAdminView({ api, config, session, setMessage }: { api: (path: 
     } catch (error) {
       setMarksEntry(null);
       setMarksDraft({});
-      setMessage(error instanceof Error ? error.message : "Marks entry unavailable.");
+      setMessage(userMessage(error, "Marks entry unavailable."));
     }
   }
   function updateMarkDraft(studentId: string, patch: Partial<{ score: string; teacherComment: string }>) {
@@ -2000,7 +2068,7 @@ function AcademicsAdminView({ api, config, session, setMessage }: { api: (path: 
       await load();
       await loadMarksEntry(marksEntry.assessment.id);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Marks could not be saved.");
+      setMessage(userMessage(error, "Marks could not be saved."));
     } finally {
       setMarksBusy(false);
     }
@@ -2015,7 +2083,7 @@ function AcademicsAdminView({ api, config, session, setMessage }: { api: (path: 
     setMessage("Report card approved by DOS and published to the portal.");
     await load();
   }
-  useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Academics unavailable.")); }, []);
+  useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Academics unavailable."))); }, []);
   const termName = config?.academicYears.flatMap((year) => year.terms).find((term) => term.id === config.school.currentTermId)?.name ?? "-";
   return <section className="operation-panel wide-panel">
     <div className="print-only">
@@ -2099,7 +2167,7 @@ function TimetableAdminView({ api, config, setMessage }: { api: (path: string, i
   const [rows, setRows] = useState<any[]>([]);
   const [form, setForm] = useState({ classId: "", streamId: "", subjectId: "", teacherId: "", room: "", dayOfWeek: "1", periodNumber: "1", startsAt: "08:00", endsAt: "08:40" });
   async function load() { setRows(asArray<any>(await api("/timetable"))); }
-  useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Timetable unavailable.")); }, []);
+  useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Timetable unavailable."))); }, []);
   useEffect(() => {
     if (!config) return;
     setForm((current) => ({
@@ -2164,7 +2232,7 @@ function InventoryAdminView({ api, setMessage }: { api: (path: string, init?: Re
     setItems(asArray<any>(nextItems));
     setMovements(asArray<any>(nextMovements));
   }
-  useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Inventory unavailable.")); }, []);
+  useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Inventory unavailable."))); }, []);
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Inventory</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["SKU", "Item", "Category", "Qty", "Reorder"]} rows={items.map((item) => [item.sku, item.name, item.category, item.quantity, item.reorderLevel])} /><FinanceTable headings={["Item", "Type", "Qty", "Status", "Reason"]} rows={movements.slice(0, 30).map((row) => [row.inventoryItem?.name ?? row.inventoryItemId, row.movementType, row.quantity, row.approvalStatus, row.reason])} /></section>;
 }
 
@@ -2176,7 +2244,7 @@ function PayrollAdminView({ api, setMessage }: { api: (path: string, init?: Requ
     setRuns(asArray<any>(nextRuns));
     setRecords(asArray<any>(nextRecords));
   }
-  useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Payroll unavailable.")); }, []);
+  useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Payroll unavailable."))); }, []);
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Payroll</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["Period", "Status", "Gross", "Deductions", "Net"]} rows={runs.map((run) => [run.period, run.status, ugx(run.grossTotal), ugx(run.deductionTotal), ugx(run.netTotal)])} /><FinanceTable headings={["Teacher", "Period", "Gross", "Deductions", "Net", "Status"]} rows={records.slice(0, 30).map((row) => [row.teacherId, row.period, ugx(row.grossPay), ugx(row.deductions), ugx(row.netPay), row.status])} /></section>;
 }
 
@@ -2188,7 +2256,7 @@ function NotificationsAdminView({ api, setMessage }: { api: (path: string, init?
     setNotifications(asArray<any>(nextNotifications));
     setAnnouncements(asArray<any>(nextAnnouncements));
   }
-  useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Notifications unavailable.")); }, []);
+  useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Notifications unavailable."))); }, []);
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Notifications & Announcements</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["Title", "Recipient", "Channel", "Status"]} rows={notifications.slice(0, 30).map((row) => [row.title, `${row.recipientType}${row.recipientId ? `:${row.recipientId}` : ""}`, row.channel, row.status])} /><FinanceTable headings={["Announcement", "Audience", "Priority", "Published"]} rows={announcements.map((row) => [row.title, row.audience, row.priority, dateOnly(row.publishAt)])} /></section>;
 }
 
@@ -2408,6 +2476,24 @@ function isFinanceOnly(roles: string[], permissions: string[]) {
     !permissionSet.has(PermissionKey.ReportCardsPublish);
 }
 
+function workspaceIdentityFor(roles: string[], permissions: string[]) {
+  const normalizedRoles = roles.map(normalizeRoleName);
+  const hasRole = (...names: string[]) => normalizedRoles.some((role) => names.includes(role));
+  const permissionSet = new Set(permissions);
+
+  if (hasRole("administrator")) return "Administration";
+  if (hasRole("dos", "dean of studies")) return "Academic Office";
+  if (hasRole("bursar", "accountant")) return "Finance Office";
+  if (hasRole("head teacher")) return "Executive Review";
+  if (hasRole("teacher", "class teacher")) return "Teacher Workspace";
+  if (permissionSet.has(PermissionKey.UsersManage)) return "Administration";
+  if (permissionSet.has(PermissionKey.AcademicSetupManage) || permissionSet.has(PermissionKey.ReportCardsPublish)) return "Academic Office";
+  if (permissionSet.has(PermissionKey.FinanceManage)) return "Finance Office";
+  if (permissionSet.has(PermissionKey.ApprovalReview)) return "Executive Review";
+  if (permissionSet.has(PermissionKey.MarksEntry) || permissionSet.has(PermissionKey.ReportCardsPrepare)) return "Teacher Workspace";
+  return "Staff Workspace";
+}
+
 function viewTitle(view: ActiveView) {
   return {
     dashboard: "Administrative Dashboard",
@@ -2433,6 +2519,33 @@ function roleNames(user: UserRecord) {
   return user.roles.map((item) => item.role.name).filter(Boolean);
 }
 
+function formatAuditAction(action: string) {
+  const labels: Record<string, string> = {
+    LOGIN_SUCCESS: "Signed in successfully",
+    LOGIN_FAILURE: "Sign-in attempt failed",
+    LOGOUT: "Signed out",
+    PASSWORD_CHANGED: "Changed password",
+    USER_CREATED: "Created a staff user",
+    USER_ROLES_UPDATED: "Updated staff role access",
+    USER_PASSWORD_RESET: "Reset a staff password",
+    STUDENT_CREATED: "Registered a student",
+    STUDENT_UPDATED: "Updated student details",
+    PORTAL_CREDENTIAL_RESET: "Reset portal credentials",
+    FINANCE_PAYMENT_CREATED: "Recorded a payment",
+    FINANCE_EXPENSE_CREATED: "Recorded an expense",
+    MARKS_SUBMITTED: "Submitted marks",
+    MARKS_APPROVED: "Approved marks",
+    REPORT_CARD_PUBLISHED: "Published a report card",
+    SYNC_CONFLICT_DECIDED: "Reviewed a sync conflict",
+    RISK_ALERT_REVIEWED: "Reviewed a risk alert"
+  };
+  return labels[action] ?? formatEntityName(action);
+}
+
+function formatEntityName(value: string) {
+  return value.toLowerCase().replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function summarizeRoles(users: UserRecord[]) {
   const counts = new Map<string, number>();
   for (const user of users) {
@@ -2449,6 +2562,27 @@ function formatRoleName(value: string) {
 
 function toggleId(values: string[], id: string) {
   return values.includes(id) ? values.filter((value) => value !== id) : [...values, id];
+}
+
+type MetricState = "loading" | "ready" | "unavailable";
+
+function stateLabel(state: MetricState) {
+  return state === "loading" ? "Loading" : "Unavailable";
+}
+
+function countMetric(value: number | string | null | undefined, state: MetricState) {
+  if (state !== "ready") return stateLabel(state);
+  return value === null || value === undefined || value === "" ? "No data" : String(value);
+}
+
+function moneyMetric(value: number | string | null | undefined, state: MetricState) {
+  if (state !== "ready") return stateLabel(state);
+  return value === null || value === undefined || value === "" ? "No amount" : ugx(value);
+}
+
+function percentMetric(value: number | string | null | undefined, state: MetricState) {
+  if (state !== "ready") return stateLabel(state);
+  return value === null || value === undefined || value === "" ? "No rate" : `${value}%`;
 }
 
 function ugx(value?: number | string | null) {
@@ -2491,7 +2625,12 @@ function stripEmpty(value: Record<string, string>) {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry));
 }
 
-createRoot(document.getElementById("root")!).render(
+type RootElement = HTMLElement & { __aethinaRoot?: ReturnType<typeof createRoot> };
+const rootElement = document.getElementById("root")! as RootElement;
+const root = rootElement.__aethinaRoot ?? createRoot(rootElement);
+rootElement.__aethinaRoot = root;
+
+root.render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
