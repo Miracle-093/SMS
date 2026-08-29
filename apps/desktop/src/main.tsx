@@ -601,15 +601,15 @@ function App() {
           <h1>Administration</h1>
           <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} />
         </div>
-        <nav>
+        <nav aria-label="Staff workspace navigation">
           {groupedSections.map((group) => (
             <div className="nav-group" key={group.group}>
               <span className="nav-group-label">{group.group}</span>
-              {group.sections.map((section) => <button key={section.id} className={activeView === section.id ? "active" : ""} onClick={() => selectView(section.id)}>{section.label}</button>)}
+              {group.sections.map((section) => <button key={section.id} type="button" className={activeView === section.id ? "active" : ""} onClick={() => selectView(section.id)}>{section.label}</button>)}
             </div>
           ))}
         </nav>
-        <button className="ghost" onClick={logout}>Logout</button>
+        <button className="ghost" type="button" onClick={logout}>Logout</button>
       </aside>
 
       <section className="workspace">
@@ -619,12 +619,12 @@ function App() {
             <strong>{session.user.displayName}</strong>
             <span>{roleWorkspaceName}</span>
           </div>
-          <button className="ghost" onClick={logout}>Logout</button>
+          <button className="ghost" type="button" onClick={logout}>Logout</button>
         </header>
         <header className="topbar">
           <div>
             <p className="eyebrow">{schoolName}</p>
-            <h2>{viewTitle(activeView)}</h2>
+            <h2>{activeView === "dashboard" ? `${roleWorkspaceName} Dashboard` : viewTitle(activeView)}</h2>
             {persona && <p className="role-caption">{persona.title} - {persona.summary}</p>}
           </div>
           <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} />
@@ -632,7 +632,7 @@ function App() {
             <span className={online ? "status online" : "status offline"}>{online ? "Online" : "Offline"}</span>
             <span>{pendingCount} pending</span>
             <span>Last sync: {lastSync}</span>
-            <button onClick={synchronize}>Sync</button>
+            <button type="button" onClick={synchronize}>Sync</button>
           </div>
         </header>
 
@@ -762,7 +762,7 @@ function App() {
           <section className="form-band">
             <div className="section-heading">
               <h3>{selected ? "Edit Student" : "Register Student"}</h3>
-              {selected && <button className="ghost" onClick={() => { setSelected(null); setForm(emptyForm); }}>New registration</button>}
+              {selected && <button className="ghost" type="button" onClick={() => { setSelected(null); setForm(emptyForm); }}>New registration</button>}
             </div>
             <StudentForm form={form} setForm={setForm} config={config} onSubmit={submitStudent} />
           </section>
@@ -2204,7 +2204,7 @@ function TimetableAdminView({ api, config, setMessage }: { api: (path: string, i
   const classes = new Map((config?.classes ?? []).map((klass) => [klass.id, klass.name]));
   const currentClass = config?.classes.find((klass) => klass.id === form.classId);
   return <section className="operation-panel wide-panel">
-    <div className="section-heading"><h3>Timetable</h3><button type="button" onClick={() => void load()}>Refresh</button></div>
+    <div className="section-heading"><h3>Timetable</h3><div className="row-actions"><button type="button" className="ghost no-print" onClick={printPage}>Print</button><button type="button" onClick={() => void load()}>Refresh</button></div></div>
     <form className="workflow-form" onSubmit={(event) => void createEntry(event)}>
       <select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value, streamId: config?.classes.find((klass) => klass.id === event.target.value)?.streams[0]?.id ?? "" })}><option value="">Class</option>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select>
       <select value={form.streamId} onChange={(event) => setForm({ ...form, streamId: event.target.value })}><option value="">All streams</option>{currentClass?.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select>
@@ -2217,8 +2217,8 @@ function TimetableAdminView({ api, config, setMessage }: { api: (path: string, i
       <input placeholder="Room" value={form.room} onChange={(event) => setForm({ ...form, room: event.target.value })} />
       <button type="submit">Add Lesson</button>
     </form>
-    <DataTable label="Timetable entries"><thead><tr><th>Day</th><th>Period</th><th>Class</th><th>Subject</th><th>Teacher</th><th>Time</th><th>Room</th></tr></thead><tbody>
-      {rows.map((row) => <tr key={row.id}><td>Day {row.dayOfWeek}</td><td>{row.periodNumber}</td><td>{classes.get(row.classId) ?? row.classId}</td><td>{subjects.get(row.subjectId) ?? row.subjectId}</td><td>{teachers.get(row.teacherId) ?? row.teacherId}</td><td>{row.startsAt}-{row.endsAt}</td><td>{row.room ?? "-"}</td></tr>)}
+    <DataTable label="Timetable entries"><thead><tr><th scope="col">Day</th><th scope="col">Period</th><th scope="col">Class</th><th scope="col">Subject</th><th scope="col">Teacher</th><th scope="col">Time</th><th scope="col">Room</th></tr></thead><tbody>
+      {rows.map((row) => <tr key={row.id}><td>{weekdayLabel(row.dayOfWeek)}</td><td>{row.periodNumber}</td><td>{classes.get(row.classId) ?? "Class not found"}</td><td>{subjects.get(row.subjectId) ?? "Subject not found"}</td><td>{teachers.get(row.teacherId) ?? "Teacher not found"}</td><td>{row.startsAt}-{row.endsAt}</td><td>{row.room ?? "Not assigned"}</td></tr>)}
       {rows.length === 0 && <tr><td colSpan={7} className="empty">No timetable entries yet.</td></tr>}
     </tbody></DataTable>
   </section>;
@@ -2544,6 +2544,12 @@ function formatAuditAction(action: string) {
 
 function formatEntityName(value: string) {
   return value.toLowerCase().replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function weekdayLabel(value: number | string) {
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const index = Number(value) - 1;
+  return days[index] ?? `Day ${value}`;
 }
 
 function summarizeRoles(users: UserRecord[]) {

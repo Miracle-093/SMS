@@ -599,6 +599,11 @@ pre {
   color: #4a5b68;
 }
 
+.mark-read {
+  margin-top: 12px;
+  width: fit-content;
+}
+
 .timetable-day h3 {
   margin-bottom: 12px;
 }

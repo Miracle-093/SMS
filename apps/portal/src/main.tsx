@@ -104,6 +104,22 @@ function PortalApp() {
     setViewErrors({});
   }
 
+  async function markNotificationRead(id: string) {
+    if (!session) return;
+    setNotifications((current) => current.map((item) => item.id === id ? { ...item, readAt: item.readAt ?? new Date().toISOString() } : item));
+    setHome((current) => current ? {
+      ...current,
+      notifications: current.notifications.map((item) => item.id === id ? { ...item, readAt: item.readAt ?? new Date().toISOString() } : item)
+    } : current);
+    try {
+      await api(`/portal/notifications/${id}/read`, session.accessToken, { method: "POST" });
+    } catch (err) {
+      const issue = readableError(err);
+      setViewErrors((current) => ({ ...current, notifications: issue }));
+      void refresh(session.accessToken, "notifications");
+    }
+  }
+
   if (!session) {
     return (
       <main className="login-shell">
@@ -115,7 +131,7 @@ function PortalApp() {
           <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
           <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
           <AlertMessage issue={error} title="Sign-in issue" />
-          <button disabled={loading} aria-busy={loading}>{loading ? "Signing in..." : "Sign in"}</button>
+          <button type="submit" disabled={loading} aria-busy={loading}>{loading ? "Signing in..." : "Sign in"}</button>
         </form>
       </main>
     );
@@ -137,9 +153,12 @@ function PortalApp() {
 
   return (
     <main className="portal">
-      <header className="mobile-top">
-        <div><strong>Satelite Secondary</strong><span>{studentDisplayName} · {workspaceIdentity}</span></div>
-        <button className="text-button" onClick={logout}>Logout</button>
+      <header className="mobile-top clean-mobile-top">
+        <div>
+          <strong>Satelite Secondary</strong>
+          <span>{studentDisplayName} - {workspaceIdentity}</span>
+        </div>
+        <button className="text-button" type="button" onClick={logout}>Logout</button>
       </header>
       <aside>
         <div className="school-mark" aria-hidden="true">SS</div>
@@ -150,12 +169,14 @@ function PortalApp() {
           <strong>{studentDisplayName}</strong>
           {studentIdentity && <small>{studentIdentity.admissionNo}</small>}
         </div>
+        <nav aria-label="Student portal navigation">
         {["home", "academics", "finance", "timetable", "announcements", "notifications"].map((view) => (
-          <button key={view} className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => setActive(view)}>
+          <button key={view} type="button" className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => setActive(view)}>
             {view === "notifications" && unread ? `Notifications (${unread})` : title(view)}
           </button>
         ))}
-        <button onClick={logout}>Sign out</button>
+        </nav>
+        <button type="button" onClick={logout}>Sign out</button>
       </aside>
       <section className="content" aria-busy={loading}>
         <header className="workspace-bar">
@@ -172,12 +193,12 @@ function PortalApp() {
         {active === "finance" && (viewErrors.finance && !loading && !finance ? <LoadFailed title="Finance unavailable" issue={viewErrors.finance} onRetry={() => void refresh(session.accessToken, "finance")} /> : <FinanceView data={finance} student={studentIdentity} />)}
         {active === "timetable" && (viewErrors.timetable && !loading ? <LoadFailed title="Timetable unavailable" issue={viewErrors.timetable} onRetry={() => void refresh(session.accessToken, "timetable")} /> : <TimetableView rows={timetable.length ? timetable : home?.timetable ?? []} />)}
         {active === "announcements" && (viewErrors.announcements && !loading ? <LoadFailed title="Announcements unavailable" issue={viewErrors.announcements} onRetry={() => void refresh(session.accessToken, "announcements")} /> : <FeedView title="Announcements" rows={announcements.length ? announcements : home?.announcements ?? []} kind="announcements" />)}
-        {active === "notifications" && (viewErrors.notifications && !loading ? <LoadFailed title="Notifications unavailable" issue={viewErrors.notifications} onRetry={() => void refresh(session.accessToken, "notifications")} /> : <FeedView title="Notifications" rows={notifications.length ? notifications : home?.notifications ?? []} kind="notifications" />)}
+        {active === "notifications" && (viewErrors.notifications && !loading ? <LoadFailed title="Notifications unavailable" issue={viewErrors.notifications} onRetry={() => void refresh(session.accessToken, "notifications")} /> : <FeedView title="Notifications" rows={notifications.length ? notifications : home?.notifications ?? []} kind="notifications" onMarkRead={(id) => void markNotificationRead(id)} />)}
         {active === "more" && <MoreView setActive={setActive} logout={logout} unread={unread} />}
       </section>
-      <nav className="bottom-nav">
+      <nav className="bottom-nav" aria-label="Primary portal navigation">
         {primaryViews.map((view) => (
-          <button key={view} className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => setActive(view)}>
+          <button key={view} type="button" className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => setActive(view)}>
             {view === "more" && unread ? `More (${unread})` : title(view)}
           </button>
         ))}
@@ -371,9 +392,9 @@ function MoreView({ setActive, logout, unread }: { setActive: (view: string) => 
     <section>
       <h2>More</h2>
       <div className="more-grid">
-        <button onClick={() => setActive("announcements")}>Announcements</button>
-        <button onClick={() => setActive("notifications")}>Notifications{unread ? ` (${unread})` : ""}</button>
-        <button onClick={logout}>Logout</button>
+        <button type="button" onClick={() => setActive("announcements")}>Announcements</button>
+        <button type="button" onClick={() => setActive("notifications")}>Notifications{unread ? ` (${unread})` : ""}</button>
+        <button type="button" onClick={logout}>Logout</button>
       </div>
     </section>
   );
@@ -391,7 +412,7 @@ function ListView({ title, rows }: { title: string; rows: any[] }) {
   );
 }
 
-function FeedView({ title, rows, kind, compact }: { title: string; rows: any[]; kind: "announcements" | "notifications"; compact?: boolean }) {
+function FeedView({ title, rows, kind, compact, onMarkRead }: { title: string; rows: any[]; kind: "announcements" | "notifications"; compact?: boolean; onMarkRead?: (id: string) => void }) {
   const emptyTitle = kind === "announcements" ? "No announcements published" : "No notifications yet";
   const emptyHelper = kind === "announcements" ? "School announcements will appear here when they are published for portal users." : "Personal and school notifications will appear here when available.";
   return (
@@ -403,10 +424,11 @@ function FeedView({ title, rows, kind, compact }: { title: string; rows: any[]; 
           <article key={row.id} className={kind === "notifications" && !row.readAt ? "unread" : undefined}>
             <div>
               <span>{kind === "announcements" ? titleCase(row.priority ?? "normal") : row.readAt ? "Read" : "Unread"}</span>
-              <time>{dateLabel(row.publishAt ?? row.createdAt)}</time>
+              <time dateTime={isoDateTime(row.publishAt ?? row.createdAt)}>{dateLabel(row.publishAt ?? row.createdAt)}</time>
             </div>
             <strong>{row.title}</strong>
             <p>{row.message ?? row.body}</p>
+            {kind === "notifications" && !row.readAt && onMarkRead && <button type="button" className="ghost mark-read" onClick={() => onMarkRead(row.id)}>Mark as read</button>}
           </article>
         ))}
       </div>
@@ -420,7 +442,7 @@ function DataTable<T extends { id: string }>({ caption, columns, empty, rows }: 
       <table className="data-table">
         <caption>{caption}</caption>
         <thead>
-          <tr>{columns.map((column) => <th key={column.heading} className={column.align === "right" ? "numeric" : undefined}>{column.heading}</th>)}</tr>
+          <tr>{columns.map((column) => <th key={column.heading} scope="col" className={column.align === "right" ? "numeric" : undefined}>{column.heading}</th>)}</tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
@@ -502,6 +524,12 @@ function dateLabel(value?: string | Date | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "N/A";
   return date.toLocaleDateString("en-UG", { year: "numeric", month: "short", day: "numeric" });
+}
+
+function isoDateTime(value?: string | Date | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
 function dayLabel(value: number | string) {
