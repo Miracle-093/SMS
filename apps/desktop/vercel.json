@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm install && npm run build --workspace apps/desktop",
+  "outputDirectory": "apps/desktop/dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
