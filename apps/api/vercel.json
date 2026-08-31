@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npm install && npm run build --workspace packages/shared-types && npm run build --workspace packages/validation && npm run build --workspace apps/api && npm run prisma:generate --workspace apps/api",
+  "buildCommand": "npm install --include=dev && npm run build --workspace packages/shared-types && npm run build --workspace packages/validation && npm run build --workspace apps/api && npm run prisma:generate --workspace apps/api",
   "functions": {
     "api/index.ts": {
       "maxDuration": 30
