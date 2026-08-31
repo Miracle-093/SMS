@@ -1,0 +1,12 @@
+node_modules
+dist
+coverage
+.turbo
+.vite
+.vite-temp
+output
+*.zip
+*.log
+*.db
+*.sqlite
+*.sqlite3

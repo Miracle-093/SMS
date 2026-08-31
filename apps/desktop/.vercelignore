@@ -1,0 +1,15 @@
+node_modules
+dist
+coverage
+.turbo
+.vite
+.vite-temp
+output
+*.zip
+*.log
+src-tauri/target
+src-tauri/gen
+src-tauri/.tauri
+*.db
+*.sqlite
+*.sqlite3
