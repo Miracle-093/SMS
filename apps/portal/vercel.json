@@ -1,6 +1,6 @@
 {
-  "buildCommand": "cd ../.. && npm install && npm run build --workspace apps/portal",
-  "outputDirectory": "dist",
+  "buildCommand": "npm install && npm run build --workspace packages/shared-types && npm run build --workspace apps/portal",
+  "outputDirectory": "apps/portal/dist",
   "rewrites": [
     {
       "source": "/(.*)",

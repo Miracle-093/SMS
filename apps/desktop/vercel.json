@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm install && npm run build --workspace apps/desktop",
+  "buildCommand": "npm install && npm run build --workspace packages/shared-types && npm run build --workspace apps/desktop",
   "outputDirectory": "apps/desktop/dist",
   "rewrites": [
     {
