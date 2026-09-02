@@ -380,6 +380,56 @@ nav button:hover {
   gap: 10px;
 }
 
+.workspace-scope-panel {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(220px, 1.2fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid #dfe6ec;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(18, 30, 38, .04);
+}
+
+.workspace-scope-panel h4 {
+  margin: 2px 0 4px;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.workspace-scope-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.workspace-scope-chips,
+.scope-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scope-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid #dce4e5;
+  border-radius: 999px;
+  background: #f9fbfa;
+  color: #25413a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scope-filter-row {
+  grid-column: 1 / -1;
+  padding-top: 2px;
+}
+
 .role-dashboard-grid {
   display: grid;
   grid-template-columns: minmax(280px, 1.2fr) repeat(2, minmax(220px, 1fr));
@@ -1437,7 +1487,8 @@ small {
   .marks-entry-toolbar,
   .setup-grid,
   .setup-form,
-  .setup-form.two-col {
+  .setup-form.two-col,
+  .workspace-scope-panel {
     grid-template-columns: 1fr;
   }
 

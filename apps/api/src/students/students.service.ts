@@ -6,6 +6,7 @@ import { ApprovalStatus, PermissionKey, SyncStatus } from "@aethina/shared-types
 import { PrismaService } from "../prisma/prisma.service.js";
 import { AuditService } from "../audit/audit.service.js";
 import { PasswordService } from "../auth/password.service.js";
+import { assertClassWithinAcademicLevelScope, classIdsForAcademicLevelScope } from "../common/academic-scope.js";
 
 @Injectable()
 export class StudentsService {
@@ -61,6 +62,8 @@ export class StudentsService {
   }
 
   async register(actor: CurrentUser, body: unknown) {
+    const input = studentRegistrationSchema.parse(body);
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, input.currentClassId);
     return this.createRegistration(actor.schoolId, actor.id, body, null);
   }
 
@@ -151,6 +154,7 @@ export class StudentsService {
 
   async update(actor: CurrentUser, id: string, body: unknown) {
     const input = studentRegistrationSchema.parse({ ...(body as Record<string, unknown>), id: undefined });
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, input.currentClassId);
     await this.validatePlacement(actor.schoolId, input.currentClassId, input.currentStreamId ?? null, input.currentAcademicYearId);
     const previous = await this.prisma.student.findFirst({ where: { id, schoolId: actor.schoolId } });
     if (!previous) {
@@ -227,6 +231,8 @@ export class StudentsService {
 
   async promote(actor: CurrentUser, body: unknown) {
     const input = studentPromotionSchema.parse(body);
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, input.previousClassId);
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, input.newClassId);
     const student = await this.prisma.student.findFirst({ where: { id: input.studentId, schoolId: actor.schoolId } });
     if (!student) {
       throw new NotFoundException("Student not found.");
@@ -285,6 +291,8 @@ export class StudentsService {
 
   private async studentVisibility(actor: CurrentUser): Promise<Prisma.StudentWhereInput[]> {
     const permissions = new Set(actor.permissions);
+    const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
+    if (scopedClassIds) return scopedClassIds.length ? [{ currentClassId: { in: scopedClassIds } }] : [{ id: "__no_students_for_academic_scope__" }];
     const canSeeWholeSchool =
       permissions.has(PermissionKey.AdmissionsManage) ||
       permissions.has(PermissionKey.AcademicSetupManage) ||

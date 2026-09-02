@@ -80,6 +80,6 @@ export class AcademicsController {
   @Get("students/:id/history")
   @RequirePermissions(PermissionKey.AcademicsRead)
   studentHistory(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {
-    return this.academics.studentHistory(user.schoolId, id);
+    return this.academics.studentHistory(user, id);
   }
 }

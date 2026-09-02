@@ -4,6 +4,7 @@ import { assessmentSchema, examinationSchema, marksEntrySchema, reportCardCommen
 import { Prisma } from "@prisma/client";
 import { AuditService } from "../audit/audit.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { assertClassWithinAcademicLevelScope, classIdsForAcademicLevelScope } from "../common/academic-scope.js";
 
 @Injectable()
 export class AcademicsService {
@@ -52,6 +53,7 @@ export class AcademicsService {
 
   async createAssessment(actor: CurrentUser, body: unknown) {
     const input = assessmentSchema.parse(body);
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, input.classId);
     const [exam, subject] = await Promise.all([
       this.prisma.examination.findFirst({ where: { id: input.examinationId, schoolId: actor.schoolId } }),
       this.prisma.subject.findFirst({ where: { id: input.subjectId, schoolId: actor.schoolId } })
@@ -174,6 +176,7 @@ export class AcademicsService {
     const input = resultDecisionSchema.parse(body);
     const assessment = await this.prisma.assessment.findFirst({ where: { id, schoolId: actor.schoolId } });
     if (!assessment) throw new NotFoundException("Assessment not found.");
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, assessment.classId);
     if (assessment.submittedBy === actor.id && ["APPROVED", "PUBLISHED"].includes(input.decision)) {
       throw new BadRequestException("A submitter cannot approve or publish their own marks.");
     }
@@ -211,12 +214,16 @@ export class AcademicsService {
     const termId = body.termId ?? school?.currentTermId;
     if (!termId) throw new BadRequestException("A term is required.");
     const classTeacherScopes = await this.classTeacherScopes(actor);
+    const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
+    const studentScope: Prisma.StudentWhereInput[] = [];
+    if (classTeacherScopes.length) studentScope.push({ OR: classTeacherScopes });
+    if (scopedClassIds) studentScope.push(scopedClassIds.length ? { currentClassId: { in: scopedClassIds } } : { id: "__no_students_for_academic_scope__" });
     const marks = await this.prisma.mark.findMany({
       where: {
         schoolId: actor.schoolId,
         status: { in: ["APPROVED", "PUBLISHED", "SUBMITTED"] },
         assessment: { termId, examinationId: body.examinationId },
-        ...(classTeacherScopes.length ? { student: { OR: classTeacherScopes } } : {})
+        ...(studentScope.length ? { student: { AND: studentScope } } : {})
       },
       include: { student: true, subject: true, assessment: true }
     });
@@ -288,6 +295,7 @@ export class AcademicsService {
   async publishReportCard(actor: CurrentUser, id: string) {
     const card = await this.prisma.reportCard.findFirst({ where: { id, schoolId: actor.schoolId } });
     if (!card) throw new NotFoundException("Report card not found.");
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, card.classId);
     if (!["PREPARED", "APPROVED"].includes(card.status)) {
       throw new BadRequestException("Class teacher must prepare the report card before DOS publishing.");
     }
@@ -297,9 +305,10 @@ export class AcademicsService {
     return published;
   }
 
-  studentHistory(schoolId: string, studentId: string) {
+  async studentHistory(actor: CurrentUser, studentId: string) {
+    const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
     return this.prisma.student.findFirstOrThrow({
-      where: { id: studentId, schoolId },
+      where: { id: studentId, schoolId: actor.schoolId, ...(scopedClassIds ? { currentClassId: { in: scopedClassIds } } : {}) },
       include: {
         marks: { include: { subject: true, assessment: { include: { examination: true } } }, orderBy: { updatedAt: "desc" } },
         reportCards: { orderBy: { generatedAt: "desc" } },
@@ -318,6 +327,8 @@ export class AcademicsService {
 
   private async assessmentVisibility(actor: CurrentUser): Promise<Prisma.AssessmentWhereInput[]> {
     const permissions = new Set(actor.permissions);
+    const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
+    if (scopedClassIds) return scopedClassIds.length ? [{ classId: { in: scopedClassIds } }] : [{ id: "__no_assessments_for_academic_scope__" }];
     if (permissions.has(PermissionKey.AcademicsManage) || permissions.has(PermissionKey.MarksReview) || permissions.has(PermissionKey.ReportCardsPublish)) return [];
     const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
     if (!teacher) return [{ id: "__no_assessments_for_user__" }];
@@ -368,6 +379,8 @@ export class AcademicsService {
 
   private async reportCardVisibility(actor: CurrentUser): Promise<Prisma.ReportCardWhereInput[]> {
     const permissions = new Set(actor.permissions);
+    const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
+    if (scopedClassIds) return scopedClassIds.length ? [{ classId: { in: scopedClassIds } }] : [{ id: "__no_report_cards_for_academic_scope__" }];
     if (permissions.has(PermissionKey.ReportCardsPublish) || permissions.has(PermissionKey.AcademicsManage) || permissions.has(PermissionKey.MarksReview)) return [];
     const scopes = await this.classTeacherScopes(actor);
     return scopes.length ? [{ OR: scopes.map((scope) => ({ classId: scope.currentClassId, streamId: scope.currentStreamId })) }] : [{ id: "__no_report_cards_for_user__" }];

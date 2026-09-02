@@ -77,9 +77,22 @@ type SchoolConfig = {
   classes: Array<{ id: string; name: string; level: number; streams: Array<{ id: string; name: string }> }>;
   subjects: Array<{ id: string; code: string; name: string; teacherId?: string | null; teacher?: { firstName: string; lastName: string } | null }>;
   gradeBoundaries: Array<{ id: string; grade: string; minScore: string; maxScore: string; remark?: string }>;
-  teachers?: Array<{ id: string; staffId: string; firstName: string; lastName: string }>;
+  teachers?: Array<{ id: string; userId?: string | null; staffId: string; firstName: string; lastName: string }>;
   teacherSubjectAssignments?: Array<{ id: string; teacherId: string; subjectId: string; classId: string; streamId?: string | null; teacher?: { firstName: string; lastName: string } }>;
   classTeacherAssignments?: Array<{ id: string; teacherId: string; classId: string; streamId?: string | null; teacher?: { firstName: string; lastName: string }; class?: { name: string }; stream?: { name: string } | null }>;
+};
+
+type StudentQuickFilter = {
+  label: string;
+  classId: string;
+  streamId?: string | null;
+};
+
+type WorkspaceScopeSummary = {
+  title: string;
+  description: string;
+  chips: string[];
+  studentFilters: StudentQuickFilter[];
 };
 
 type Student = {
@@ -331,6 +344,7 @@ function App() {
   const activeViewPermitted = !session || visibleSections.some((section) => section.id === activeView);
   const schoolName = config?.school.name ?? "Satelite Secondary School";
   const roleWorkspaceName = session ? workspaceIdentityFor(session.user.roles, session.user.permissions) : "Staff Workspace";
+  const workspaceScope = useMemo(() => session && config ? workspaceScopeFor(session.user, config) : null, [session, config]);
 
   function showMessage(nextMessage: string) {
     setErrorNotice(null);
@@ -599,7 +613,7 @@ function App() {
         <div>
           <p className="eyebrow">{schoolName}</p>
           <h1>Administration</h1>
-          <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} />
+          <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} scope={workspaceScope?.title} />
         </div>
         <nav aria-label="Staff workspace navigation">
           {groupedSections.map((group) => (
@@ -627,7 +641,7 @@ function App() {
             <h2>{activeView === "dashboard" ? `${roleWorkspaceName} Dashboard` : viewTitle(activeView)}</h2>
             {persona && <p className="role-caption">{persona.title} - {persona.summary}</p>}
           </div>
-          <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} />
+          <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} scope={workspaceScope?.title} />
           <div className="status-strip">
             <span className={online ? "status online" : "status offline"}>{online ? "Online" : "Offline"}</span>
             <span>{pendingCount} pending</span>
@@ -645,7 +659,18 @@ function App() {
           </label>
         </div>
 
-        {persona && activeView === "dashboard" && <RoleHomeCard persona={persona} sections={visibleSections} setActiveView={selectView} />}
+        {persona && activeView === "dashboard" && (
+          <RoleHomeCard
+            persona={persona}
+            sections={visibleSections}
+            scope={workspaceScope}
+            setActiveView={selectView}
+            applyStudentFilter={(filter) => {
+              setFilters((current) => ({ ...current, classId: filter.classId, streamId: filter.streamId ?? "" }));
+              selectView("students");
+            }}
+          />
+        )}
 
         <AppNotice message={message} error={errorNotice} />
 
@@ -672,9 +697,9 @@ function App() {
         ) : activeView === "dashboard" ? (
           <DashboardView api={api} session={session} online={online} pendingCount={pendingCount} lastSync={lastSync} setMessage={showMessage} />
         ) : activeView === "academics" ? (
-          <AcademicsAdminView api={api} config={config} session={session} setMessage={showMessage} />
+          <AcademicsAdminView api={api} config={config} session={session} scope={workspaceScope} setMessage={showMessage} />
         ) : activeView === "timetable" ? (
-          <TimetableAdminView api={api} config={config} setMessage={showMessage} />
+          <TimetableAdminView api={api} config={config} scope={workspaceScope} setMessage={showMessage} />
         ) : activeView === "finance" ? (
           <FinanceView api={api} config={config} students={visibleStudents} session={session} online={online} refreshOfflineState={refreshOfflineState} setMessage={showMessage} />
         ) : activeView === "budgets" ? (
@@ -700,6 +725,12 @@ function App() {
         ) : activeView === "audit" ? (
           <AuditView api={api} />
         ) : <>
+        {workspaceScope?.studentFilters.length ? (
+          <WorkspaceScopePanel
+            summary={workspaceScope}
+            onStudentFilter={(filter) => setFilters((current) => ({ ...current, classId: filter.classId, streamId: filter.streamId ?? "" }))}
+          />
+        ) : null}
         <section className="content-grid">
           <section className="list-pane">
             <div className="filters">
@@ -798,7 +829,19 @@ function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) =
   );
 }
 
-function RoleHomeCard({ persona, sections, setActiveView }: { persona: Persona; sections: AppSection[]; setActiveView: (view: ActiveView) => void }) {
+function RoleHomeCard({
+  persona,
+  sections,
+  scope,
+  setActiveView,
+  applyStudentFilter
+}: {
+  persona: Persona;
+  sections: AppSection[];
+  scope: WorkspaceScopeSummary | null;
+  setActiveView: (view: ActiveView) => void;
+  applyStudentFilter: (filter: StudentQuickFilter) => void;
+}) {
   const workspace = roleWorkspaceFor(persona, sections);
   return (
     <section className="role-home role-workspace">
@@ -812,6 +855,8 @@ function RoleHomeCard({ persona, sections, setActiveView }: { persona: Persona; 
           {workspace.actions.map((action) => <button key={action.view} type="button" className="ghost" onClick={() => setActiveView(action.view)}>{action.label}</button>)}
         </div>
       </div>
+
+      {scope && <WorkspaceScopePanel summary={scope} onStudentFilter={applyStudentFilter} />}
 
       <div className="role-workspace-compact">
         <section className="role-focus-panel role-primary-panel">
@@ -834,6 +879,30 @@ function RoleHomeCard({ persona, sections, setActiveView }: { persona: Persona; 
           <ul className="role-check-list attention">{workspace.alerts.map((item) => <li key={item}>{item}</li>)}</ul>
         </details>
       </div>
+    </section>
+  );
+}
+
+function WorkspaceScopePanel({ summary, onStudentFilter }: { summary: WorkspaceScopeSummary; onStudentFilter?: (filter: StudentQuickFilter) => void }) {
+  return (
+    <section className="workspace-scope-panel" aria-label="Workspace ownership">
+      <div>
+        <p className="eyebrow">Workspace ownership</p>
+        <h4>{summary.title}</h4>
+        <p>{summary.description}</p>
+      </div>
+      <div className="workspace-scope-chips">
+        {summary.chips.map((chip) => <span key={chip} className="scope-chip">{chip}</span>)}
+      </div>
+      {onStudentFilter && summary.studentFilters.length > 0 && (
+        <div className="scope-filter-row">
+          {summary.studentFilters.slice(0, 6).map((filter) => (
+            <button key={`${filter.classId}-${filter.streamId ?? "all"}`} type="button" className="ghost" onClick={() => onStudentFilter(filter)}>
+              {filter.label}
+            </button>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -1939,7 +2008,7 @@ function RiskAlertsView({ api, setMessage }: { api: (path: string, init?: Reques
   return <section className="operation-panel"><div className="section-heading"><h3>Financial Risk Alert Center</h3><button type="button" onClick={() => void load()}>Refresh</button></div><DataTable label="Financial risk alerts"><thead><tr><th>Risk</th><th>Entity</th><th>Amount</th><th>Reason</th><th>Status</th><th>Review</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.category}<br /><span className="pill">{row.severity}</span></td><td>{row.entityType}<br /><small>{row.entityId}</small></td><td>{ugx(row.amount)}</td><td>{row.reason}</td><td>{row.status}</td><td className="row-actions"><button type="button" onClick={() => void review(row.id, "UNDER_REVIEW")}>Review</button><button className="ghost" type="button" onClick={() => void review(row.id, "RESOLVED")}>Resolve</button><button className="ghost" type="button" onClick={() => void review(row.id, "FALSE_POSITIVE")}>False Positive</button><button className="ghost" type="button" onClick={() => void review(row.id, "ESCALATED")}>Escalate</button></td></tr>)}{rows.length === 0 && <tr><td colSpan={6} className="empty">No financial risk alerts found.</td></tr>}</tbody></DataTable></section>;
 }
 
-function AcademicsAdminView({ api, config, session, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; session: Session; setMessage: (message: string) => void }) {
+function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; session: Session; scope: WorkspaceScopeSummary | null; setMessage: (message: string) => void }) {
   const [exams, setExams] = useState<any[]>([]);
   const [assessments, setAssessments] = useState<any[]>([]);
   const [cards, setCards] = useState<any[]>([]);
@@ -2098,6 +2167,7 @@ function AcademicsAdminView({ api, config, session, setMessage }: { api: (path: 
         <button type="button" onClick={() => void load()}>Refresh</button>
       </div>
     </div>
+    {scope && <WorkspaceScopePanel summary={scope} />}
     <div className="summary-strip"><span>Current term: {termName}</span><span>{assessments.filter((item) => item.status === "SUBMITTED").length} awaiting review</span><span>{cards.filter((item) => item.status === "PUBLISHED").length} published report cards</span></div>
     {canEnterMarks && <section className="operation-panel marks-entry-panel">
       <div className="section-heading">
@@ -2163,7 +2233,7 @@ function AcademicsAdminView({ api, config, session, setMessage }: { api: (path: 
   </section>;
 }
 
-function TimetableAdminView({ api, config, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; setMessage: (message: string) => void }) {
+function TimetableAdminView({ api, config, scope, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; scope: WorkspaceScopeSummary | null; setMessage: (message: string) => void }) {
   const [rows, setRows] = useState<any[]>([]);
   const [form, setForm] = useState({ classId: "", streamId: "", subjectId: "", teacherId: "", room: "", dayOfWeek: "1", periodNumber: "1", startsAt: "08:00", endsAt: "08:40" });
   async function load() { setRows(asArray<any>(await api("/timetable"))); }
@@ -2205,6 +2275,7 @@ function TimetableAdminView({ api, config, setMessage }: { api: (path: string, i
   const currentClass = config?.classes.find((klass) => klass.id === form.classId);
   return <section className="operation-panel wide-panel">
     <div className="section-heading"><h3>Timetable</h3><div className="row-actions"><button type="button" className="ghost no-print" onClick={printPage}>Print</button><button type="button" onClick={() => void load()}>Refresh</button></div></div>
+    {scope && <WorkspaceScopePanel summary={scope} />}
     <form className="workflow-form" onSubmit={(event) => void createEntry(event)}>
       <select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value, streamId: config?.classes.find((klass) => klass.id === event.target.value)?.streams[0]?.id ?? "" })}><option value="">Class</option>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select>
       <select value={form.streamId} onChange={(event) => setForm({ ...form, streamId: event.target.value })}><option value="">All streams</option>{currentClass?.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select>
@@ -2291,6 +2362,97 @@ function asArray<T>(value: unknown): T[] {
 function sectionsForUser(permissions: string[]) {
   const permissionSet = new Set(permissions);
   return appSections.filter((section) => section.permissions.some((permission) => permissionSet.has(permission)));
+}
+
+function workspaceScopeFor(user: Session["user"], config: SchoolConfig): WorkspaceScopeSummary | null {
+  const normalizedRoles = user.roles.map(normalizeRoleName);
+  const roleText = normalizedRoles.join(" ");
+  const teacher = config.teachers?.find((item) => item.userId === user.id);
+  const subjectAssignments = teacher ? (config.teacherSubjectAssignments ?? []).filter((assignment) => assignment.teacherId === teacher.id) : [];
+  const classAssignments = teacher ? (config.classTeacherAssignments ?? []).filter((assignment) => assignment.teacherId === teacher.id) : [];
+  const dosClasses = classesForDosRole(roleText, config.classes);
+
+  if (dosClasses.length > 0) {
+    const label = dosBandLabel(roleText);
+    return {
+      title: label,
+      description: "Academic records, reports, setup, and timetable actions are limited to this school division.",
+      chips: dosClasses.map((klass) => `${klass.name}${klass.streams.length ? ` - ${klass.streams.length} stream${klass.streams.length === 1 ? "" : "s"}` : ""}`),
+      studentFilters: dosClasses.map((klass) => ({ label: klass.name, classId: klass.id }))
+    };
+  }
+
+  if (classAssignments.length > 0) {
+    const filters = classAssignments.map((assignment) => ({
+      label: classStreamLabel(config, assignment.classId, assignment.streamId),
+      classId: assignment.classId,
+      streamId: assignment.streamId
+    }));
+    return {
+      title: `Class Teacher: ${filters.map((item) => item.label).join(", ")}`,
+      description: "This workspace centers on assigned learners, report-card preparation, timetable follow-up, and guardian support.",
+      chips: [...filters.map((item) => item.label), `${subjectAssignments.length} assigned subject${subjectAssignments.length === 1 ? "" : "s"}`],
+      studentFilters: filters
+    };
+  }
+
+  if (subjectAssignments.length > 0) {
+    const subjectLabels = subjectAssignments.map((assignment) => {
+      const subject = config.subjects.find((item) => item.id === assignment.subjectId);
+      return `${subject?.name ?? "Subject"} - ${classStreamLabel(config, assignment.classId, assignment.streamId)}`;
+    });
+    return {
+      title: "Assigned Teaching Load",
+      description: "Marks entry, rosters, and timetable views are scoped to assigned subjects and classes.",
+      chips: subjectLabels,
+      studentFilters: uniqueFilters(subjectAssignments.map((assignment) => ({
+        label: classStreamLabel(config, assignment.classId, assignment.streamId),
+        classId: assignment.classId,
+        streamId: assignment.streamId
+      })))
+    };
+  }
+
+  if (roleText.includes("bursar") || roleText.includes("accountant")) {
+    return {
+      title: "Finance Office",
+      description: "Fees, receipts, balances, reminders, budgets, and cash-flow records are handled from this workspace.",
+      chips: ["UGX fee accounts", "Receipts", "Budgets", "Cash flow"],
+      studentFilters: []
+    };
+  }
+
+  return null;
+}
+
+function classesForDosRole(roleText: string, classes: SchoolConfig["classes"]) {
+  if (roleText.includes("lower")) return classes.filter((klass) => klass.level >= 1 && klass.level <= 2);
+  if (roleText.includes("middle")) return classes.filter((klass) => klass.level >= 3 && klass.level <= 4);
+  if (roleText.includes("upper")) return classes.filter((klass) => klass.level >= 5 && klass.level <= 6);
+  return [];
+}
+
+function dosBandLabel(roleText: string) {
+  if (roleText.includes("lower")) return "Lower School DOS: S1-S2";
+  if (roleText.includes("middle")) return "Middle School DOS: S3-S4";
+  if (roleText.includes("upper")) return "Upper School DOS: S5-S6";
+  return "Dean of Studies";
+}
+
+function classStreamLabel(config: SchoolConfig, classId: string, streamId?: string | null) {
+  const klass = config.classes.find((item) => item.id === classId);
+  const stream = klass?.streams.find((item) => item.id === streamId);
+  return [klass?.name ?? "Class", stream?.name].filter(Boolean).join(" ");
+}
+
+function uniqueFilters(filters: StudentQuickFilter[]) {
+  const seen = new Set<string>();
+  return filters.filter((filter) => {
+    const key = `${filter.classId}:${filter.streamId ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function roleWorkspaceFor(persona: Persona, sections: AppSection[]): RoleWorkspace {

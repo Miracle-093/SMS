@@ -28,6 +28,25 @@ export enum UserRole {
   Student = "STUDENT"
 }
 
+export enum AcademicLevelBand {
+  Lower = "LOWER",
+  Middle = "MIDDLE",
+  Upper = "UPPER"
+}
+
+export type AcademicLevelBandConfig = {
+  band: AcademicLevelBand;
+  label: string;
+  minLevel: number;
+  maxLevel: number;
+};
+
+export const ACADEMIC_LEVEL_BANDS: AcademicLevelBandConfig[] = [
+  { band: AcademicLevelBand.Lower, label: "Lower School (S1-S2)", minLevel: 1, maxLevel: 2 },
+  { band: AcademicLevelBand.Middle, label: "Middle School (S3-S4)", minLevel: 3, maxLevel: 4 },
+  { band: AcademicLevelBand.Upper, label: "Upper School (S5-S6)", minLevel: 5, maxLevel: 6 }
+];
+
 export enum Gender {
   Female = "FEMALE",
   Male = "MALE",

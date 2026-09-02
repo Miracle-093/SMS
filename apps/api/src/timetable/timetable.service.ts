@@ -4,6 +4,7 @@ import { PermissionKey } from "@aethina/shared-types";
 import { timetableEntrySchema } from "@aethina/validation";
 import { AuditService } from "../audit/audit.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { assertClassWithinAcademicLevelScope, classIdsForAcademicLevelScope } from "../common/academic-scope.js";
 
 @Injectable()
 export class TimetableService {
@@ -14,14 +15,16 @@ export class TimetableService {
 
   async list(actor: CurrentUser, query: Record<string, string | undefined>) {
     const teacherScope = await this.teacherScope(actor);
+    const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
     return this.prisma.timetableEntry.findMany({
-      where: { schoolId: actor.schoolId, deletedAt: null, academicYearId: query.academicYearId, termId: query.termId, classId: query.classId, streamId: query.streamId, teacherId: teacherScope ?? query.teacherId },
+      where: { schoolId: actor.schoolId, deletedAt: null, academicYearId: query.academicYearId, termId: query.termId, classId: query.classId, streamId: query.streamId, teacherId: teacherScope ?? query.teacherId, ...(scopedClassIds ? { AND: [{ classId: { in: scopedClassIds } }] } : {}) },
       orderBy: [{ dayOfWeek: "asc" }, { periodNumber: "asc" }]
     });
   }
 
   async create(actor: CurrentUser, body: unknown) {
     const input = timetableEntrySchema.parse(body);
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, input.classId);
     if (input.startsAt >= input.endsAt) throw new BadRequestException("Start time must be before end time.");
     const conflict = await this.prisma.timetableEntry.findFirst({
       where: {

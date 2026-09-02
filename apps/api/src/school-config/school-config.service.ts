@@ -3,6 +3,7 @@ import { academicYearSchema, classSchema, gradeBoundarySchema, schoolProfileSche
 import type { CurrentUser } from "@aethina/shared-types";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { AuditService } from "../audit/audit.service.js";
+import { assertClassWithinAcademicLevelScope, classIdsForAcademicLevelScope } from "../common/academic-scope.js";
 
 @Injectable()
 export class SchoolConfigService {
@@ -11,18 +12,22 @@ export class SchoolConfigService {
     @Inject(AuditService) private readonly audit: AuditService
   ) {}
 
-  async overview(schoolId: string) {
+  async overview(actor: CurrentUser) {
+    const schoolId = actor.schoolId;
+    const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
+    const classWhere = scopedClassIds ? { schoolId, id: { in: scopedClassIds } } : { schoolId };
+    const classAssignmentWhere = scopedClassIds ? { schoolId, isActive: true, classId: { in: scopedClassIds } } : { schoolId, isActive: true };
     const [school, academicYears, classes, subjects, gradeBoundaries] = await Promise.all([
       this.prisma.school.findUniqueOrThrow({ where: { id: schoolId } }),
       this.prisma.academicYear.findMany({ where: { schoolId }, include: { terms: true }, orderBy: { startsAt: "desc" } }),
-      this.prisma.class.findMany({ where: { schoolId }, include: { streams: true }, orderBy: { level: "asc" } }),
+      this.prisma.class.findMany({ where: classWhere, include: { streams: true }, orderBy: { level: "asc" } }),
       this.prisma.subject.findMany({ where: { schoolId }, include: { teacher: true }, orderBy: { name: "asc" } }),
       this.prisma.gradeBoundary.findMany({ where: { schoolId }, orderBy: { minScore: "desc" } })
     ]);
     const [teachers, teacherSubjectAssignments, classTeacherAssignments] = await Promise.all([
       this.prisma.teacher.findMany({ where: { schoolId }, orderBy: [{ lastName: "asc" }, { firstName: "asc" }] }),
-      this.prisma.teacherSubjectAssignment.findMany({ where: { schoolId, isActive: true }, include: { teacher: true }, orderBy: { createdAt: "desc" } }),
-      this.prisma.classTeacherAssignment.findMany({ where: { schoolId, isActive: true }, include: { teacher: true, class: true, stream: true, academicYear: true, term: true }, orderBy: { createdAt: "desc" } })
+      this.prisma.teacherSubjectAssignment.findMany({ where: classAssignmentWhere, include: { teacher: true }, orderBy: { createdAt: "desc" } }),
+      this.prisma.classTeacherAssignment.findMany({ where: classAssignmentWhere, include: { teacher: true, class: true, stream: true, academicYear: true, term: true }, orderBy: { createdAt: "desc" } })
     ]);
     return { school, academicYears, classes, subjects, gradeBoundaries, teachers, teacherSubjectAssignments, classTeacherAssignments };
   }
@@ -87,6 +92,7 @@ export class SchoolConfigService {
 
   async createClass(actor: CurrentUser, body: unknown) {
     const input = classSchema.parse(body);
+    if (!isClassLevelAllowedByAcademicRole(actor, input.level)) throw new BadRequestException("This class level is outside your academic office scope.");
     const record = await this.prisma.class.create({ data: { schoolId: actor.schoolId, ...input } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "CLASS_CREATED", entityType: "CLASS", entityId: record.id, newValue: record });
     return record;
@@ -98,6 +104,7 @@ export class SchoolConfigService {
     if (!klass) {
       throw new BadRequestException("Class does not belong to this school.");
     }
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, input.classId);
     const record = await this.prisma.stream.create({ data: { schoolId: actor.schoolId, ...input } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "STREAM_CREATED", entityType: "STREAM", entityId: record.id, newValue: record });
     return record;
@@ -113,6 +120,7 @@ export class SchoolConfigService {
   async createTeacherSubjectAssignment(actor: CurrentUser, body: unknown) {
     const input = body as { teacherId?: string; subjectId?: string; classId?: string; streamId?: string | null };
     if (!input.teacherId || !input.subjectId || !input.classId) throw new BadRequestException("Teacher, subject and class are required.");
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, input.classId);
     await this.validateAcademicOwnership(actor.schoolId, input.teacherId, input.subjectId, input.classId, input.streamId ?? null);
     const existing = await this.prisma.teacherSubjectAssignment.findFirst({
       where: { schoolId: actor.schoolId, teacherId: input.teacherId, subjectId: input.subjectId, classId: input.classId, streamId: input.streamId ?? null }
@@ -127,6 +135,7 @@ export class SchoolConfigService {
   async createClassTeacherAssignment(actor: CurrentUser, body: unknown) {
     const input = body as { teacherId?: string; classId?: string; streamId?: string | null; academicYearId?: string; termId?: string | null };
     if (!input.teacherId || !input.classId || !input.academicYearId) throw new BadRequestException("Teacher, class and academic year are required.");
+    await assertClassWithinAcademicLevelScope(this.prisma, actor, input.classId);
     await this.validateAcademicOwnership(actor.schoolId, input.teacherId, null, input.classId, input.streamId ?? null);
     const year = await this.prisma.academicYear.findFirst({ where: { id: input.academicYearId, schoolId: actor.schoolId } });
     if (!year) throw new BadRequestException("Academic year does not belong to this school.");
@@ -163,4 +172,13 @@ export class SchoolConfigService {
       if (!stream) throw new BadRequestException("Stream must belong to the selected class.");
     }
   }
+}
+
+function isClassLevelAllowedByAcademicRole(actor: CurrentUser, level: number) {
+  const roleText = actor.roles.join(" ").toLowerCase();
+  const isScoped = roleText.includes("lower") || roleText.includes("middle") || roleText.includes("upper");
+  if (!isScoped) return true;
+  return (roleText.includes("lower") && level >= 1 && level <= 2)
+    || (roleText.includes("middle") && level >= 3 && level <= 4)
+    || (roleText.includes("upper") && level >= 5 && level <= 6);
 }

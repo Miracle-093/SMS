@@ -14,7 +14,7 @@ export class SchoolConfigController {
   @Get()
   @RequirePermissions(PermissionKey.StudentsRead)
   overview(@CurrentUserParam() user: CurrentUser) {
-    return this.schoolConfig.overview(user.schoolId);
+    return this.schoolConfig.overview(user);
   }
 
   @Put("profile")

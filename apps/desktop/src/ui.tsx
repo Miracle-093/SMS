@@ -74,12 +74,14 @@ export function UserIdentity({
   displayName,
   roles,
   workspace,
-  school
+  school,
+  scope
 }: {
   displayName: string;
   roles: string[];
   workspace: string;
   school: string;
+  scope?: string | null;
 }) {
   const roleText = roles.length ? roles.map(formatRoleLabel).join(", ") : "Role pending";
   return (
@@ -87,6 +89,7 @@ export function UserIdentity({
       <strong>{displayName}</strong>
       <span>{roleText}</span>
       <span>{workspace} - {school}</span>
+      {scope && <span>{scope}</span>}
     </div>
   );
 }

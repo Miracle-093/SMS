@@ -5,6 +5,7 @@ import { AcademicsService } from "../src/academics/academics.service.js";
 import { AttendanceService } from "../src/attendance/attendance.service.js";
 import { FinanceService } from "../src/finance/finance.service.js";
 import { SyncService } from "../src/sync/sync.service.js";
+import { StudentsService } from "../src/students/students.service.js";
 import { UsersService } from "../src/users/users.service.js";
 
 const schoolId = "11111111-1111-4111-8111-111111111111";
@@ -16,6 +17,7 @@ const invoiceId = "77777777-7777-4777-8777-777777777777";
 const assessmentId = "88888888-8888-4888-8888-888888888888";
 const subjectId = "99999999-9999-4999-8999-999999999999";
 const classId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const upperClassId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const teacherId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const deviceId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
@@ -101,6 +103,54 @@ describe("tenant and referential integrity regressions", () => {
     })).rejects.toBeInstanceOf(BadRequestException);
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("scopes lower-school DOS student lists to S1-S2 classes", async () => {
+    const prisma = {
+      class: { findMany: vi.fn().mockResolvedValue([{ id: classId }]) },
+      student: { findMany: vi.fn().mockResolvedValue([]) }
+    };
+    const service = new StudentsService(prisma as never, { record: vi.fn() } as never, {} as never);
+    const lowerDos = {
+      ...actor,
+      roles: ["Lower School Dean of Studies"],
+      permissions: [PermissionKey.StudentsRead, PermissionKey.AcademicSetupManage]
+    };
+
+    await service.list(lowerDos, {});
+
+    expect(prisma.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        AND: [{ currentClassId: { in: [classId] } }]
+      })
+    }));
+  });
+
+  it("rejects scoped DOS academic writes outside their level band", async () => {
+    const prisma = {
+      class: { findMany: vi.fn().mockResolvedValue([{ id: classId }]) },
+      examination: { findFirst: vi.fn() },
+      subject: { findFirst: vi.fn() },
+      assessment: { aggregate: vi.fn(), create: vi.fn() }
+    };
+    const service = new AcademicsService(prisma as never, { record: vi.fn() } as never);
+    const lowerDos = {
+      ...actor,
+      roles: ["Lower School Dean of Studies"],
+      permissions: [PermissionKey.AcademicsManage]
+    };
+
+    await expect(service.createAssessment(lowerDos, {
+      termId,
+      examinationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      subjectId,
+      classId: upperClassId,
+      name: "Upper literature",
+      maxScore: 100,
+      weight: 100
+    })).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.assessment.create).not.toHaveBeenCalled();
   });
 
   it("filters sync pulls by role permissions and blocks unauthorized writes", async () => {
