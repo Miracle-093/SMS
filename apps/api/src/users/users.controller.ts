@@ -23,6 +23,12 @@ export class UsersController {
     return this.usersService.roles(user.schoolId);
   }
 
+  @Get("academic-scopes")
+  @RequirePermissions(PermissionKey.UsersManage)
+  academicScopes(@CurrentUserParam() user: CurrentUser) {
+    return this.usersService.academicScopes(user.schoolId);
+  }
+
   @Post()
   @RequirePermissions(PermissionKey.UsersManage)
   create(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
@@ -51,5 +57,17 @@ export class UsersController {
   @RequirePermissions(PermissionKey.UsersManage)
   assignRoles(@CurrentUserParam() user: CurrentUser, @Param("id") id: string, @Body() body: unknown) {
     return this.usersService.assignRoles(user, id, body);
+  }
+
+  @Post(":id/academic-scopes")
+  @RequirePermissions(PermissionKey.UsersManage)
+  assignAcademicScopes(@CurrentUserParam() user: CurrentUser, @Param("id") id: string, @Body() body: unknown) {
+    return this.usersService.assignAcademicScopes(user, id, body);
+  }
+
+  @Post("academic-scopes/:id/deactivate")
+  @RequirePermissions(PermissionKey.UsersManage)
+  deactivateAcademicScope(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {
+    return this.usersService.deactivateAcademicScope(user, id);
   }
 }

@@ -59,6 +59,12 @@ enum StudentStatus {
   GRADUATED
 }
 
+enum AcademicLevelBand {
+  LOWER
+  MIDDLE
+  UPPER
+}
+
 model School {
   id        String   @id @default(uuid())
   name      String
@@ -75,6 +81,7 @@ model School {
 
   users             User[]
   roles             Role[]
+  academicScopeAssignments AcademicScopeAssignment[]
   students          Student[]
   guardians         Guardian[]
   classes           Class[]
@@ -150,6 +157,7 @@ model User {
 
   school School     @relation(fields: [schoolId], references: [id])
   roles  UserRole[]
+  academicScopeAssignments AcademicScopeAssignment[]
 }
 
 model UserRole {
@@ -159,6 +167,25 @@ model UserRole {
   role   Role @relation(fields: [roleId], references: [id])
 
   @@id([userId, roleId])
+}
+
+model AcademicScopeAssignment {
+  id        String            @id @default(uuid())
+  schoolId  String
+  userId    String
+  band      AcademicLevelBand
+  minLevel  Int
+  maxLevel  Int
+  isActive  Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([userId, band])
+  @@index([schoolId, userId, isActive])
+  @@index([schoolId, band, isActive])
 }
 
 model Student {

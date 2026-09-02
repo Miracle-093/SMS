@@ -83,6 +83,10 @@ export const adminUserRolesSchema = z.object({
   roleIds: z.array(z.string().uuid()).min(1)
 });
 
+export const academicScopeAssignmentSchema = z.object({
+  bands: z.array(z.enum(["LOWER", "MIDDLE", "UPPER"])).min(1)
+});
+
 export const schoolProfileSchema = z.object({
   name: z.string().min(2),
   code: z.string().min(2),

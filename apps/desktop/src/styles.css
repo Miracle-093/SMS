@@ -813,13 +813,30 @@ tbody tr:hover {
   align-items: end;
 }
 
-.role-checklist {
+.role-checklist,
+.scope-checklist {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
 }
 
-.role-checklist label {
+.scope-checklist {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.scope-checklist legend {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.role-checklist label,
+.scope-checklist label {
   display: grid;
   grid-template-columns: 18px 1fr;
   gap: 10px;
@@ -830,20 +847,29 @@ tbody tr:hover {
   background: #fff;
 }
 
-.role-checklist input {
+.role-checklist input,
+.scope-checklist input {
   width: 18px;
   min-height: 18px;
   margin-top: 2px;
 }
 
 .role-checklist strong,
-.role-checklist small {
+.role-checklist small,
+.scope-checklist strong,
+.scope-checklist small {
   display: block;
 }
 
-.role-checklist small {
+.role-checklist small,
+.scope-checklist small {
   margin-top: 4px;
   color: var(--muted);
+}
+
+.muted-text {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .profile,

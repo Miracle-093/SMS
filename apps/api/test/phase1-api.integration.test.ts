@@ -86,6 +86,40 @@ describe("Phase 1 core integration", () => {
     expect(auditCount).toBeGreaterThanOrEqual(3);
   }, 60_000);
 
+  it("lets administrators assign persisted DOS academic scopes", async () => {
+    const stamp = Date.now();
+    const roles = await authGet("/users/roles");
+    const dosRole = roles.find((role: { name: string }) => role.name === "Dean of Studies");
+    expect(dosRole).toBeTruthy();
+    const scopedPassword = `AeLower${stamp}!`;
+    const scopedDos = await authPost("/users", {
+      displayName: "Lower School Scope Test",
+      email: `lower-dos-${stamp}@example.test`,
+      temporaryPassword: scopedPassword,
+      roleIds: [dosRole.id]
+    });
+
+    const assigned = await authPost(`/users/${scopedDos.id}/academic-scopes`, { bands: ["LOWER"] });
+    expect(assigned).toHaveLength(1);
+    expect(assigned[0].band).toBe("LOWER");
+    expect(assigned[0].minLevel).toBe(1);
+    expect(assigned[0].maxLevel).toBe(2);
+
+    const allScopes = await authGet("/users/academic-scopes");
+    expect(allScopes.some((scope: { userId: string; band: string }) => scope.userId === scopedDos.id && scope.band === "LOWER")).toBe(true);
+
+    const scopedLogin = await post("/auth/login", { email: `lower-dos-${stamp}@example.test`, password: scopedPassword, deviceId: "00000000-0000-4000-8000-000000000001" });
+    const scopedStudents = await authGetAs(scopedLogin.accessToken, "/students");
+    expect(scopedStudents.length).toBeGreaterThan(0);
+    expect(scopedStudents.every((student: { currentClass?: { level: number } }) => (student.currentClass?.level ?? 99) <= 2)).toBe(true);
+
+    const allUsers = await authGet("/users");
+    const bursar = allUsers.find((user: { email: string }) => user.email === "bursar@aethina.test");
+    expect(bursar).toBeTruthy();
+    const rejected = await rawPost(`/users/${bursar.id}/academic-scopes`, { bands: ["LOWER"] }, token);
+    expect(rejected.status).toBe(400);
+  }, 60_000);
+
   it("supports attendance review, correction approval, sync conflict review and audit browsing", async () => {
     const teacher = await prisma.teacher.findUniqueOrThrow({ where: { staffId: "TCH-001" } });
     const attendanceDate = new Date("2026-08-11T00:00:00.000Z");

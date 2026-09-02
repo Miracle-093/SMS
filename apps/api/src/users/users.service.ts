@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { AcademicLevelBand } from "@prisma/client";
 import { adminPasswordResetSchema, adminUserCreateSchema, adminUserRolesSchema } from "@aethina/validation";
 import type { CurrentUser } from "@aethina/shared-types";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -25,7 +26,8 @@ export class UsersService {
         failedLoginAttempts: true,
         lockedUntil: true,
         lastLoginAt: true,
-        roles: { select: { role: { select: { id: true, name: true } } } }
+        roles: { select: { role: { select: { id: true, name: true } } } },
+        academicScopeAssignments: { where: { isActive: true }, select: { id: true, band: true, minLevel: true, maxLevel: true } }
       },
       orderBy: { displayName: "asc" }
     });
@@ -42,6 +44,14 @@ export class UsersService {
         _count: { select: { users: true } }
       },
       orderBy: { name: "asc" }
+    });
+  }
+
+  academicScopes(schoolId: string) {
+    return this.prisma.academicScopeAssignment.findMany({
+      where: { schoolId },
+      include: { user: { select: { id: true, displayName: true, email: true, roles: { select: { role: { select: { name: true } } } } } } },
+      orderBy: [{ user: { displayName: "asc" } }, { band: "asc" }]
     });
   }
 
@@ -157,6 +167,64 @@ export class UsersService {
     return updated;
   }
 
+  async assignAcademicScopes(actor: CurrentUser, userId: string, body: unknown) {
+    const input = parseAcademicScopeAssignment(body);
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, schoolId: actor.schoolId },
+      include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } }
+    });
+    if (!user) throw new NotFoundException("User not found.");
+    if (!this.canReceiveAcademicScope(user.roles)) {
+      throw new BadRequestException("Academic scope can only be assigned to Dean of Studies or academic administrator users.");
+    }
+    const bandRanges = {
+      LOWER: { minLevel: 1, maxLevel: 2 },
+      MIDDLE: { minLevel: 3, maxLevel: 4 },
+      UPPER: { minLevel: 5, maxLevel: 6 }
+    } as const;
+    const uniqueBands = Array.from(new Set(input.bands));
+    const scopes = await this.prisma.$transaction(async (tx) => {
+      const rows = [];
+      for (const band of uniqueBands) {
+        const range = bandRanges[band];
+        rows.push(await tx.academicScopeAssignment.upsert({
+          where: { userId_band: { userId, band } },
+          update: { schoolId: actor.schoolId, minLevel: range.minLevel, maxLevel: range.maxLevel, isActive: true },
+          create: { schoolId: actor.schoolId, userId, band, minLevel: range.minLevel, maxLevel: range.maxLevel }
+        }));
+      }
+      return rows;
+    });
+    await this.audit.record({
+      schoolId: actor.schoolId,
+      actorId: actor.id,
+      action: "USER_ACADEMIC_SCOPE_ASSIGNED",
+      entityType: "USER",
+      entityId: userId,
+      newValue: { bands: uniqueBands }
+    });
+    return scopes;
+  }
+
+  async deactivateAcademicScope(actor: CurrentUser, scopeId: string) {
+    const scope = await this.prisma.academicScopeAssignment.findFirst({ where: { id: scopeId, schoolId: actor.schoolId } });
+    if (!scope) throw new NotFoundException("Academic scope assignment not found.");
+    const updated = await this.prisma.academicScopeAssignment.update({
+      where: { id: scope.id },
+      data: { isActive: false }
+    });
+    await this.audit.record({
+      schoolId: actor.schoolId,
+      actorId: actor.id,
+      action: "USER_ACADEMIC_SCOPE_DEACTIVATED",
+      entityType: "USER",
+      entityId: scope.userId,
+      previousValue: scope,
+      newValue: { id: updated.id, isActive: updated.isActive }
+    });
+    return updated;
+  }
+
   private async rolesForSchool(schoolId: string, roleIds: string[]) {
     const uniqueRoleIds = Array.from(new Set(roleIds));
     const roles = await this.prisma.role.findMany({
@@ -179,7 +247,28 @@ export class UsersService {
       failedLoginAttempts: true,
       lockedUntil: true,
       lastLoginAt: true,
-      roles: { select: { role: { select: { id: true, name: true } } } }
+      roles: { select: { role: { select: { id: true, name: true } } } },
+      academicScopeAssignments: { where: { isActive: true }, select: { id: true, band: true, minLevel: true, maxLevel: true } }
     } as const;
   }
+
+  private canReceiveAcademicScope(roles: Array<{ role: { name: string; permissions: Array<{ permission: { key: string } }> } }>) {
+    return roles.some((item) => {
+      const roleName = item.role.name.toLowerCase();
+      const permissions = new Set(item.role.permissions.map((permission) => permission.permission.key));
+      return roleName.includes("dean of studies") || roleName.includes("dos") ||
+        (permissions.has("academic-setup.manage") && permissions.has("report-cards.publish"));
+    });
+  }
+}
+
+type AcademicScopeBand = keyof typeof AcademicLevelBand;
+
+function parseAcademicScopeAssignment(body: unknown): { bands: AcademicScopeBand[] } {
+  const bands = Array.isArray((body as { bands?: unknown })?.bands) ? (body as { bands: unknown[] }).bands : [];
+  const allowed = new Set<string>(Object.values(AcademicLevelBand));
+  const parsed = bands.filter((band): band is AcademicScopeBand => typeof band === "string" && allowed.has(band));
+  if (parsed.length === 0) throw new BadRequestException("Choose at least one academic scope.");
+  if (parsed.length !== bands.length) throw new BadRequestException("Academic scope must be lower, middle, or upper school.");
+  return { bands: parsed };
 }

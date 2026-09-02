@@ -32,9 +32,12 @@ export function academicLevelScopeLabel(actor: CurrentUser) {
 }
 
 export async function classIdsForAcademicLevelScope(prisma: PrismaService, actor: CurrentUser): Promise<string[] | null> {
-  const bands = academicLevelBandsForUser(actor);
+  const bands = await academicLevelBandsForActor(prisma, actor);
   if (bands.length === 0) return null;
-  const ranges = academicLevelBands.filter((item) => bands.includes(item.band));
+  const ranges = bands.map((band) => ({
+    minLevel: band.minLevel,
+    maxLevel: band.maxLevel
+  }));
   const classes = await prisma.class.findMany({
     where: {
       schoolId: actor.schoolId,
@@ -43,6 +46,14 @@ export async function classIdsForAcademicLevelScope(prisma: PrismaService, actor
     select: { id: true }
   });
   return classes.map((klass) => klass.id);
+}
+
+export async function assertClassLevelWithinAcademicScope(prisma: PrismaService, actor: CurrentUser, level: number) {
+  const bands = await academicLevelBandsForActor(prisma, actor);
+  if (bands.length === 0) return;
+  if (!bands.some((band) => level >= band.minLevel && level <= band.maxLevel)) {
+    throw new BadRequestException(`This class level is outside ${bands.map((band) => band.label).join(", ")}.`);
+  }
 }
 
 export async function assertClassWithinAcademicLevelScope(prisma: PrismaService, actor: CurrentUser, classId: string | null | undefined) {
@@ -59,4 +70,21 @@ export function classIdWhereForScope(classIds: string[] | null): Prisma.StringNu
 
 function normalizeRoleName(value: string) {
   return value.toLowerCase().replaceAll("_", " ").replace(/\s+/g, " ").trim();
+}
+
+async function academicLevelBandsForActor(prisma: PrismaService, actor: CurrentUser) {
+  const explicit = await prisma.academicScopeAssignment.findMany({
+    where: { schoolId: actor.schoolId, userId: actor.id, isActive: true },
+    select: { band: true, minLevel: true, maxLevel: true }
+  });
+  if (explicit.length > 0) {
+    return explicit.map((item) => ({
+      band: item.band as AcademicLevelBand,
+      label: academicLevelBands.find((band) => band.band === item.band)?.label ?? `${item.minLevel}-${item.maxLevel}`,
+      minLevel: item.minLevel,
+      maxLevel: item.maxLevel
+    }));
+  }
+  const fallbackBands = academicLevelBandsForUser(actor);
+  return academicLevelBands.filter((item) => fallbackBands.includes(item.band));
 }

@@ -107,6 +107,7 @@ describe("tenant and referential integrity regressions", () => {
 
   it("scopes lower-school DOS student lists to S1-S2 classes", async () => {
     const prisma = {
+      academicScopeAssignment: { findMany: vi.fn().mockResolvedValue([]) },
       class: { findMany: vi.fn().mockResolvedValue([{ id: classId }]) },
       student: { findMany: vi.fn().mockResolvedValue([]) }
     };
@@ -128,6 +129,7 @@ describe("tenant and referential integrity regressions", () => {
 
   it("rejects scoped DOS academic writes outside their level band", async () => {
     const prisma = {
+      academicScopeAssignment: { findMany: vi.fn().mockResolvedValue([]) },
       class: { findMany: vi.fn().mockResolvedValue([{ id: classId }]) },
       examination: { findFirst: vi.fn() },
       subject: { findFirst: vi.fn() },

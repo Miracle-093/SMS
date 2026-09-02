@@ -80,6 +80,7 @@ type SchoolConfig = {
   teachers?: Array<{ id: string; userId?: string | null; staffId: string; firstName: string; lastName: string }>;
   teacherSubjectAssignments?: Array<{ id: string; teacherId: string; subjectId: string; classId: string; streamId?: string | null; teacher?: { firstName: string; lastName: string } }>;
   classTeacherAssignments?: Array<{ id: string; teacherId: string; classId: string; streamId?: string | null; teacher?: { firstName: string; lastName: string }; class?: { name: string }; stream?: { name: string } | null }>;
+  academicScopeAssignments?: Array<{ id: string; userId: string; band: "LOWER" | "MIDDLE" | "UPPER"; minLevel: number; maxLevel: number; user?: { id: string; displayName: string; email: string } }>;
 };
 
 type StudentQuickFilter = {
@@ -261,6 +262,7 @@ type UserRecord = {
   lockedUntil?: string | null;
   lastLoginAt?: string | null;
   roles: Array<{ role: { id: string; name: string } }>;
+  academicScopeAssignments?: Array<{ id: string; band: "LOWER" | "MIDDLE" | "UPPER"; minLevel: number; maxLevel: number }>;
 };
 
 type RoleOption = {
@@ -1767,6 +1769,8 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
   const [createForm, setCreateForm] = useState({ displayName: "", email: "", temporaryPassword: "", roleIds: [] as string[] });
   const [roleEditUserId, setRoleEditUserId] = useState("");
   const [roleEditIds, setRoleEditIds] = useState<string[]>([]);
+  const [scopeUserId, setScopeUserId] = useState("");
+  const [scopeBands, setScopeBands] = useState<Array<"LOWER" | "MIDDLE" | "UPPER">>([]);
   const [busy, setBusy] = useState(false);
 
   async function load() {
@@ -1787,6 +1791,8 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
   });
   const selectedResetUser = users.find((user) => user.id === resetUserId);
   const selectedRoleUser = users.find((user) => user.id === roleEditUserId);
+  const selectedScopeUser = users.find((user) => user.id === scopeUserId);
+  const academicUsers = users.filter(isAcademicScopeCandidate);
   const roleSummary = summarizeRoles(users);
 
   async function setActive(user: UserRecord, isActive: boolean) {
@@ -1861,6 +1867,27 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
     setRoleEditIds(user.roles.map((item) => item.role.id));
   }
 
+  function startScopeEdit(user: UserRecord) {
+    setScopeUserId(user.id);
+    setScopeBands((user.academicScopeAssignments ?? []).map((scope) => scope.band));
+  }
+
+  async function saveAcademicScopes(event: React.FormEvent) {
+    event.preventDefault();
+    if (!scopeUserId || scopeBands.length === 0) {
+      setMessage("Choose an academic user and at least one school division.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/users/${scopeUserId}/academic-scopes`, { method: "POST", body: JSON.stringify({ bands: scopeBands }) });
+      setMessage(`Academic scope updated for ${selectedScopeUser?.displayName ?? "selected user"}.`);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="operation-panel wide-panel">
       <div className="section-heading">
@@ -1899,12 +1926,13 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
       </div>
 
       <DataTable label="Users and assigned roles">
-          <thead><tr><th>User</th><th>Roles</th><th>Status</th><th>Security</th><th>Last Login</th><th>Actions</th></tr></thead>
+          <thead><tr><th>User</th><th>Roles</th><th>Academic Scope</th><th>Status</th><th>Security</th><th>Last Login</th><th>Actions</th></tr></thead>
           <tbody>
             {filteredUsers.map((user) => (
               <tr key={user.id}>
                 <td>{user.displayName}<br /><small>{user.email}</small></td>
                 <td><div className="pill-stack">{roleNames(user).map((role) => <span className="pill" key={role}>{formatRoleName(role)}</span>)}</div></td>
+                <td><AcademicScopeBadges scopes={user.academicScopeAssignments ?? []} /></td>
                 <td><span className="pill">{user.isActive ? "ACTIVE" : "INACTIVE"}</span></td>
                 <td>
                   {user.mustChangePassword ? "Password reset pending" : "Password current"}
@@ -1915,6 +1943,7 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
                 <td className="row-actions">
                   <button className="ghost" type="button" onClick={() => setResetUserId(user.id)}>Reset</button>
                   <button className="ghost" type="button" disabled={user.id === session.user.id} onClick={() => startRoleEdit(user)}>Roles</button>
+                  {isAcademicScopeCandidate(user) && <button className="ghost" type="button" onClick={() => startScopeEdit(user)}>Scope</button>}
                   {user.isActive ? (
                     <button className="ghost" type="button" disabled={busy || user.id === session.user.id} onClick={() => void setActive(user, false)}>Deactivate</button>
                   ) : (
@@ -1923,7 +1952,7 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
                 </td>
               </tr>
             ))}
-            {filteredUsers.length === 0 && <tr><td colSpan={6} className="empty">No users match the current filters.</td></tr>}
+            {filteredUsers.length === 0 && <tr><td colSpan={7} className="empty">No users match the current filters.</td></tr>}
           </tbody>
       </DataTable>
 
@@ -1961,6 +1990,30 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
         <RoleChecklist roles={roles} selected={roleEditIds} onChange={setRoleEditIds} />
       </form>
 
+      <form className="admin-form-panel" onSubmit={saveAcademicScopes}>
+        <div className="section-heading compact-heading">
+          <div>
+            <h4>DOS Academic Scope</h4>
+            <p className="panel-copy">{selectedScopeUser ? `${selectedScopeUser.displayName} - ${academicScopeText(selectedScopeUser.academicScopeAssignments ?? [])}` : "Assign lower, middle, or upper school ownership to an academic administrator."}</p>
+          </div>
+          <button type="submit" disabled={busy || !scopeUserId || scopeBands.length === 0}>Save Scope</button>
+        </div>
+        <div className="inline-admin-form embedded">
+          <label>
+            Academic user
+            <select value={scopeUserId} onChange={(event) => {
+              const user = users.find((item) => item.id === event.target.value);
+              setScopeUserId(event.target.value);
+              setScopeBands((user?.academicScopeAssignments ?? []).map((scope) => scope.band));
+            }}>
+              <option value="">Choose DOS user</option>
+              {academicUsers.map((user) => <option key={user.id} value={user.id}>{user.displayName} - {user.email}</option>)}
+            </select>
+          </label>
+          <ScopeChecklist selected={scopeBands} onChange={setScopeBands} />
+        </div>
+      </form>
+
       <form className="inline-admin-form" onSubmit={resetPassword}>
         <label>
           User
@@ -1994,6 +2047,30 @@ function RoleChecklist({ roles, selected, onChange }: { roles: RoleOption[]; sel
       {roles.length === 0 && <div className="empty-state">No roles have been configured for this school.</div>}
     </div>
   );
+}
+
+function ScopeChecklist({ selected, onChange }: { selected: Array<"LOWER" | "MIDDLE" | "UPPER">; onChange: (bands: Array<"LOWER" | "MIDDLE" | "UPPER">) => void }) {
+  const bands: Array<{ value: "LOWER" | "MIDDLE" | "UPPER"; label: string; helper: string }> = [
+    { value: "LOWER", label: "Lower School", helper: "S1-S2" },
+    { value: "MIDDLE", label: "Middle School", helper: "S3-S4" },
+    { value: "UPPER", label: "Upper School", helper: "S5-S6" }
+  ];
+  return (
+    <fieldset className="scope-checklist">
+      <legend>School division</legend>
+      {bands.map((band) => (
+        <label key={band.value}>
+          <input type="checkbox" checked={selected.includes(band.value)} onChange={() => onChange(toggleBand(selected, band.value))} />
+          <span><strong>{band.label}</strong><small>{band.helper}</small></span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+function AcademicScopeBadges({ scopes }: { scopes: Array<{ band: "LOWER" | "MIDDLE" | "UPPER"; minLevel: number; maxLevel: number }> }) {
+  if (scopes.length === 0) return <span className="muted-text">Whole school or not assigned</span>;
+  return <div className="pill-stack">{scopes.map((scope) => <span key={scope.band} className="pill">{academicScopeLabel(scope)}</span>)}</div>;
 }
 
 function RiskAlertsView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
@@ -2370,10 +2447,13 @@ function workspaceScopeFor(user: Session["user"], config: SchoolConfig): Workspa
   const teacher = config.teachers?.find((item) => item.userId === user.id);
   const subjectAssignments = teacher ? (config.teacherSubjectAssignments ?? []).filter((assignment) => assignment.teacherId === teacher.id) : [];
   const classAssignments = teacher ? (config.classTeacherAssignments ?? []).filter((assignment) => assignment.teacherId === teacher.id) : [];
-  const dosClasses = classesForDosRole(roleText, config.classes);
+  const explicitScopes = (config.academicScopeAssignments ?? []).filter((scope) => scope.userId === user.id);
+  const dosClasses = explicitScopes.length
+    ? classesForAcademicScopes(explicitScopes, config.classes)
+    : classesForDosRole(roleText, config.classes);
 
   if (dosClasses.length > 0) {
-    const label = dosBandLabel(roleText);
+    const label = explicitScopes.length ? explicitScopes.map(academicScopeLabel).join(", ") : dosBandLabel(roleText);
     return {
       title: label,
       description: "Academic records, reports, setup, and timetable actions are limited to this school division.",
@@ -2430,6 +2510,10 @@ function classesForDosRole(roleText: string, classes: SchoolConfig["classes"]) {
   if (roleText.includes("middle")) return classes.filter((klass) => klass.level >= 3 && klass.level <= 4);
   if (roleText.includes("upper")) return classes.filter((klass) => klass.level >= 5 && klass.level <= 6);
   return [];
+}
+
+function classesForAcademicScopes(scopes: Array<{ minLevel: number; maxLevel: number }>, classes: SchoolConfig["classes"]) {
+  return classes.filter((klass) => scopes.some((scope) => klass.level >= scope.minLevel && klass.level <= scope.maxLevel));
 }
 
 function dosBandLabel(roleText: string) {
@@ -2728,8 +2812,26 @@ function formatRoleName(value: string) {
   return value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function academicScopeText(scopes: Array<{ band: "LOWER" | "MIDDLE" | "UPPER"; minLevel: number; maxLevel: number }>) {
+  return scopes.length ? scopes.map(academicScopeLabel).join(", ") : "No explicit scope assigned";
+}
+
+function academicScopeLabel(scope: { band: "LOWER" | "MIDDLE" | "UPPER"; minLevel: number; maxLevel: number }) {
+  const labels = { LOWER: "Lower S1-S2", MIDDLE: "Middle S3-S4", UPPER: "Upper S5-S6" };
+  return labels[scope.band] ?? `${scope.minLevel}-${scope.maxLevel}`;
+}
+
+function isAcademicScopeCandidate(user: UserRecord) {
+  const text = roleNames(user).join(" ").toLowerCase();
+  return text.includes("dean of studies") || text.includes("dos");
+}
+
 function toggleId(values: string[], id: string) {
   return values.includes(id) ? values.filter((value) => value !== id) : [...values, id];
+}
+
+function toggleBand(selected: Array<"LOWER" | "MIDDLE" | "UPPER">, band: "LOWER" | "MIDDLE" | "UPPER") {
+  return selected.includes(band) ? selected.filter((value) => value !== band) : [...selected, band];
 }
 
 type MetricState = "loading" | "ready" | "unavailable";
