@@ -1294,6 +1294,106 @@ td.row-actions {
   align-items: start;
 }
 
+.finance-command-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, .75fr) minmax(360px, 1.25fr);
+  gap: 14px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid #d8e0e7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.finance-command-panel h3 {
+  margin: 2px 0 6px;
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.finance-command-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.finance-command-cards,
+.selected-invoice-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+}
+
+.finance-command-cards span,
+.selected-invoice-panel span {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #e1e8ee;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.finance-command-cards strong,
+.selected-invoice-panel strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.finance-command-cards .finance-good {
+  border-color: #bedbcc;
+  background: #edf7f3;
+}
+
+.finance-command-cards .finance-watch {
+  border-color: #f7d08a;
+  background: #fff8e4;
+}
+
+.finance-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(180px, .35fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf1f4;
+  background: #fbfcfd;
+}
+
+.finance-filter-bar label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #354250;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.selected-invoice-panel {
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf1f4;
+  background: #fbfcfd;
+}
+
+.receipt-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin: 0 14px 12px;
+  padding: 10px 12px;
+  border: 1px solid #bedbcc;
+  border-radius: 8px;
+  background: #edf7f3;
+  color: var(--forest);
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .wide-panel {
   grid-column: 1 / -1;
 }
@@ -1780,6 +1880,8 @@ small {
   .setup-grid,
   .setup-command-panel,
   .setup-command-cards,
+  .finance-command-panel,
+  .finance-filter-bar,
   .setup-form,
   .setup-form.two-col,
   .roster-preview-form,

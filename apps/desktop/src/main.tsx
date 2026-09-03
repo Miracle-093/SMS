@@ -1802,18 +1802,23 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
   const [fees, setFees] = useState<FeeStructureRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
+  const [budgets, setBudgets] = useState<BudgetRecord[]>([]);
   const [localPayments, setLocalPayments] = useState<any[]>([]);
   const [localExpenses, setLocalExpenses] = useState<any[]>([]);
-  const [feeForm, setFeeForm] = useState({ classId: "", category: "Tuition", name: "", amount: "", dueDate: "2026-02-01", isMandatory: true });
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [invoiceStatus, setInvoiceStatus] = useState("");
+  const [lastReceipt, setLastReceipt] = useState<{ receiptNo: string; student: string; amount: number; balance: number } | null>(null);
+  const [feeForm, setFeeForm] = useState({ classId: "", category: "Tuition", name: "", amount: "", dueDate: defaultFinanceDueDate(config), isMandatory: true });
   const [paymentForm, setPaymentForm] = useState({ invoiceId: "", amount: "", method: "CASH", reference: "", paidAt: new Date().toISOString().slice(0, 10), notes: "" });
   const [expenseForm, setExpenseForm] = useState({ category: "Stationery", department: "Administration", description: "", amount: "", method: "CASH", payee: "", reference: "", budgetId: "", spentAt: new Date().toISOString().slice(0, 10) });
 
   async function load() {
-    const [nextOverview, nextFees, nextInvoices, nextExpenses, pendingPayments, pendingExpenses] = await Promise.all([
+    const [nextOverview, nextFees, nextInvoices, nextExpenses, nextBudgets, pendingPayments, pendingExpenses] = await Promise.all([
       api("/finance/overview"),
       api("/finance/fee-structures"),
       api("/finance/invoices"),
       api("/finance/expenses"),
+      api("/finance/budgets"),
       readLocalPayments(),
       readLocalExpenses()
     ]);
@@ -1821,6 +1826,7 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
     setFees(asArray<FeeStructureRecord>(nextFees));
     setInvoices(asArray<InvoiceRecord>(nextInvoices));
     setExpenses(asArray<any>(nextExpenses));
+    setBudgets(asArray<BudgetRecord>(nextBudgets));
     setLocalPayments(asArray<any>(pendingPayments));
     setLocalExpenses(asArray<any>(pendingExpenses));
   }
@@ -1830,7 +1836,7 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
   }, []);
 
   useEffect(() => {
-    if (config) setFeeForm((current) => ({ ...current, classId: current.classId || config.classes[0]?.id || "" }));
+    if (config) setFeeForm((current) => ({ ...current, classId: current.classId || config.classes[0]?.id || "", dueDate: current.dueDate || defaultFinanceDueDate(config) }));
   }, [config]);
 
   async function createFee(event: React.FormEvent) {
@@ -1892,13 +1898,26 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
     };
     try {
       if (!online) throw new Error("Offline");
-      await api("/finance/payments", { method: "POST", body: JSON.stringify(payload) });
+      const result = await api("/finance/payments", { method: "POST", body: JSON.stringify(payload) });
+      setLastReceipt({
+        receiptNo: result?.receipt?.receiptNo ?? result?.payment?.receiptNo ?? "Receipt generated",
+        student: invoice ? `${invoice.student.firstName} ${invoice.student.lastName}` : "Selected student",
+        amount,
+        balance: Number(result?.remainingBalance ?? Number(invoice.balance) - amount)
+      });
+      setPaymentForm((current) => ({ ...current, invoiceId: amount >= Number(invoice.balance) ? "" : current.invoiceId, amount: "", reference: "", notes: "" }));
       setMessage("Payment recorded and receipt generated.");
-    } catch {
+    } catch (error) {
+      if (online && !isOfflineCaptureError(error)) {
+        setMessage(userMessage(error, "Payment could not be recorded. Please review the invoice, amount, and reference."));
+        return;
+      }
       const id = crypto.randomUUID();
       const offlineReceiptNo = `OFF-${deviceId.slice(-4)}-${Date.now()}`;
       await upsertLocalPayment({ id, ...payload, schoolId: session.user.schoolId, deviceId, receiptNo: offlineReceiptNo, syncStatus: "PENDING" });
       await addPendingChange({ id: crypto.randomUUID(), entityType: SyncEntityType.Payment, entityId: id, operation: "CREATE", payload: { ...payload, receiptNo: offlineReceiptNo }, baseVersion: null, createdAt: new Date().toISOString(), retryCount: 0 }, session.user.schoolId, deviceId);
+      setLastReceipt({ receiptNo: offlineReceiptNo, student: `${invoice.student.firstName} ${invoice.student.lastName}`, amount, balance: Number(invoice.balance) - amount });
+      setPaymentForm((current) => ({ ...current, invoiceId: amount >= Number(invoice.balance) ? "" : current.invoiceId, amount: "", reference: "", notes: "" }));
       setMessage(`Payment saved offline with provisional receipt ${offlineReceiptNo}.`);
     }
     await refreshOfflineState();
@@ -1916,11 +1935,17 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
     try {
       if (!online) throw new Error("Offline");
       await api("/finance/expenses", { method: "POST", body: JSON.stringify(payload) });
+      setExpenseForm((current) => ({ ...current, description: "", amount: "", payee: "", reference: "" }));
       setMessage("Expense recorded.");
-    } catch {
+    } catch (error) {
+      if (online && !isOfflineCaptureError(error)) {
+        setMessage(userMessage(error, "Expense could not be recorded. Please review the amount, budget, and reference."));
+        return;
+      }
       const id = crypto.randomUUID();
       await upsertLocalExpense({ id, ...payload, schoolId: session.user.schoolId, deviceId, expenseNo: `OFF-EXP-${Date.now()}`, approvalStatus: "PENDING", syncStatus: "PENDING" });
       await addPendingChange({ id: crypto.randomUUID(), entityType: SyncEntityType.Expense, entityId: id, operation: "CREATE", payload, baseVersion: null, createdAt: new Date().toISOString(), retryCount: 0 }, session.user.schoolId, deviceId);
+      setExpenseForm((current) => ({ ...current, description: "", amount: "", payee: "", reference: "" }));
       setMessage("Expense saved offline and queued for synchronization.");
     }
     await refreshOfflineState();
@@ -1928,17 +1953,38 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
   }
 
   const selectedPaymentInvoice = invoices.find((invoice) => invoice.id === paymentForm.invoiceId);
+  const invoiceQuery = invoiceSearch.trim().toLowerCase();
+  const filteredInvoices = invoices.filter((invoice) => {
+    const haystack = [invoice.invoiceNo, invoice.student.admissionNo, invoice.student.firstName, invoice.student.lastName, invoice.status].join(" ").toLowerCase();
+    return (!invoiceQuery || haystack.includes(invoiceQuery)) && (!invoiceStatus || invoice.status === invoiceStatus);
+  });
+  const overdueInvoices = invoices.filter((invoice) => Number(invoice.balance) > 0 && invoice.dueDate && new Date(invoice.dueDate) < new Date());
+  const partialInvoices = invoices.filter((invoice) => Number(invoice.amountPaid) > 0 && Number(invoice.balance) > 0);
   const paymentRows = invoices.flatMap((invoice) => (invoice.payments ?? []).map((payment) => [
     payment.receipt?.receiptNo ?? payment.receiptNo ?? "-",
     invoice.invoiceNo,
     `${invoice.student.firstName} ${invoice.student.lastName}`,
     ugx(payment.amount),
-    payment.method,
+    financeLabel(payment.method),
     dateOnly(payment.paidAt)
   ]));
+  const expenseRows = expenses.map((expense) => [
+    expense.expenseNo ?? "Pending number",
+    expense.category,
+    expense.department ?? "Unassigned",
+    ugx(expense.amount),
+    financeLabel(expense.approvalStatus)
+  ]);
   const canCreateFee = Boolean(feeForm.classId && feeForm.name.trim() && positiveNumber(feeForm.amount));
   const canRecordPayment = Boolean(selectedPaymentInvoice && positiveNumber(paymentForm.amount) && Number(paymentForm.amount) <= Number(selectedPaymentInvoice.balance));
   const canRecordExpense = Boolean(expenseForm.category.trim() && expenseForm.description.trim() && positiveNumber(expenseForm.amount));
+  const financeHealth = overview ? [
+    { label: "Collection rate", value: `${overview.collectionPercentage ?? 0}%`, tone: Number(overview.collectionPercentage ?? 0) >= 80 ? "good" : "watch" },
+    { label: "Overdue invoices", value: String(overdueInvoices.length), tone: overdueInvoices.length ? "watch" : "good" },
+    { label: "Offline queue", value: String(localPayments.length + localExpenses.length), tone: localPayments.length + localExpenses.length ? "watch" : "good" }
+  ] : [];
+  const selectedStudentName = selectedPaymentInvoice ? `${selectedPaymentInvoice.student.firstName} ${selectedPaymentInvoice.student.lastName}` : "";
+  const selectedBalance = selectedPaymentInvoice ? Number(selectedPaymentInvoice.balance) : 0;
 
   return (
     <section className="operations-grid finance-layout">
@@ -1946,8 +1992,21 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
         <h2>{config?.school.name ?? "Aethina School Management System"} Finance Output</h2>
         <p>Generated {new Date().toLocaleString()} by {session.user.displayName}</p>
       </div>
+      <section className="finance-command-panel wide-panel">
+        <div>
+          <p className="eyebrow">Finance office</p>
+          <h3>Bursar Collection Desk</h3>
+          <p>Record fees, issue receipts, track outstanding balances, and keep expenses ready for review.</p>
+        </div>
+        <div className="finance-command-cards">
+          <span><strong>{invoices.length}</strong>Total invoices</span>
+          <span><strong>{overdueInvoices.length}</strong>Overdue</span>
+          <span><strong>{partialInvoices.length}</strong>Partial payments</span>
+          {financeHealth.map((item) => <span key={item.label} className={item.tone === "watch" ? "finance-watch" : "finance-good"}><strong>{item.value}</strong>{item.label}</span>)}
+        </div>
+      </section>
       <div className="tabs wide-panel">
-        {["overview", "fees", "invoices", "payments", "expenses", "reports"].map((item) => <button key={item} className={tab === item ? "active" : "ghost"} type="button" onClick={() => setTab(item as typeof tab)}>{item}</button>)}
+        {["overview", "fees", "invoices", "payments", "expenses", "reports"].map((item) => <button key={item} className={tab === item ? "active" : "ghost"} type="button" onClick={() => setTab(item as typeof tab)}>{formatEntityName(item)}</button>)}
       </div>
       {tab === "overview" && <section className="metric-grid wide-panel">
         <div className="section-heading print-span"><h3>Essential Financial Summary</h3><button type="button" className="ghost no-print" onClick={printPage}>Print</button></div>
@@ -1970,32 +2029,53 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
         </form>
         <FinanceTable rows={fees.map((fee) => [fee.class?.name ?? "-", fee.category, fee.name, ugx(fee.amount), fee.isActive ? "Active" : "Inactive"])} headings={["Class", "Category", "Name", "Amount", "Status"]} />
       </section>}
-      {tab === "invoices" && <section className="operation-panel wide-panel"><div className="section-heading"><h3>Student Invoices / Fee Statements</h3><button type="button" className="ghost no-print" onClick={printPage}>Print</button></div><InvoiceTable invoices={invoices} /></section>}
+      {tab === "invoices" && <section className="operation-panel wide-panel">
+        <div className="section-heading"><h3>Student Invoices / Fee Statements</h3><button type="button" className="ghost no-print" onClick={printPage}>Print Statement</button></div>
+        <div className="finance-filter-bar no-print">
+          <label>Search invoice or student<input value={invoiceSearch} onChange={(event) => setInvoiceSearch(event.target.value)} placeholder="Admission, invoice, or name" /></label>
+          <label>Status<select value={invoiceStatus} onChange={(event) => setInvoiceStatus(event.target.value)}><option value="">All statuses</option>{uniqueValues(invoices.map((invoice) => invoice.status)).map((status) => <option key={status} value={status}>{financeLabel(status)}</option>)}</select></label>
+          <span className="pill">{filteredInvoices.length} shown</span>
+        </div>
+        <InvoiceTable invoices={filteredInvoices} />
+      </section>}
       {tab === "payments" && <section className="operation-panel wide-panel">
         <div className="section-heading"><h3>Record Payment</h3><div className="row-actions"><button type="button" className="ghost no-print" onClick={printPage}>Print Receipts</button><span className="pill">{localPayments.length} offline pending</span></div></div>
-        <form className="inline-form" onSubmit={(event) => void recordPayment(event)}>
-          <select value={paymentForm.invoiceId} onChange={(event) => setPaymentForm({ ...paymentForm, invoiceId: event.target.value })}><option value="">Select invoice</option>{invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNo} - {invoice.student.firstName} {invoice.student.lastName} - {ugx(invoice.balance)}</option>)}</select>
-          <input type="number" min="1" max={selectedPaymentInvoice ? Number(selectedPaymentInvoice.balance) : undefined} step="1" placeholder="Amount" value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} required />
-          <select value={paymentForm.method} onChange={(event) => setPaymentForm({ ...paymentForm, method: event.target.value })}>{["CASH", "MOBILE_MONEY", "BANK_TRANSFER", "BANK_DEPOSIT", "CHEQUE", "ONLINE_PAYMENT", "OTHER"].map((method) => <option key={method}>{method}</option>)}</select>
-          <input placeholder="Reference" value={paymentForm.reference} onChange={(event) => setPaymentForm({ ...paymentForm, reference: event.target.value })} />
-          <input type="date" value={paymentForm.paidAt} onChange={(event) => setPaymentForm({ ...paymentForm, paidAt: event.target.value })} />
+        {selectedPaymentInvoice ? (
+          <div className="selected-invoice-panel">
+            <span><strong>{selectedPaymentInvoice.invoiceNo}</strong>{selectedStudentName}</span>
+            <span><strong>{ugx(selectedPaymentInvoice.amount)}</strong>Expected</span>
+            <span><strong>{ugx(selectedPaymentInvoice.amountPaid)}</strong>Already paid</span>
+            <span><strong>{ugx(selectedPaymentInvoice.balance)}</strong>Outstanding</span>
+          </div>
+        ) : (
+          <p className="panel-copy">Choose an issued or partially paid invoice before recording money received.</p>
+        )}
+        <form className="inline-form finance-payment-form" onSubmit={(event) => void recordPayment(event)}>
+          <label>Invoice<select value={paymentForm.invoiceId} onChange={(event) => setPaymentForm({ ...paymentForm, invoiceId: event.target.value })}><option value="">Select invoice</option>{invoices.filter((invoice) => Number(invoice.balance) > 0).map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNo} - {invoice.student.firstName} {invoice.student.lastName} - {ugx(invoice.balance)}</option>)}</select></label>
+          <label>Amount<input type="number" min="1" max={selectedPaymentInvoice ? Number(selectedPaymentInvoice.balance) : undefined} step="1" placeholder="Amount received" value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} required /></label>
+          <label>Method<select value={paymentForm.method} onChange={(event) => setPaymentForm({ ...paymentForm, method: event.target.value })}>{["CASH", "MOBILE_MONEY", "BANK_TRANSFER", "BANK_DEPOSIT", "CHEQUE", "ONLINE_PAYMENT", "OTHER"].map((method) => <option key={method} value={method}>{financeLabel(method)}</option>)}</select></label>
+          <label>Reference<input placeholder="Receipt, cheque, bank or mobile money ref" value={paymentForm.reference} onChange={(event) => setPaymentForm({ ...paymentForm, reference: event.target.value })} /></label>
+          <label>Date received<input type="date" value={paymentForm.paidAt} onChange={(event) => setPaymentForm({ ...paymentForm, paidAt: event.target.value })} /></label>
+          <button type="button" className="ghost" disabled={!selectedPaymentInvoice} onClick={() => setPaymentForm({ ...paymentForm, amount: selectedBalance ? String(selectedBalance) : "" })}>Full Balance</button>
           <button type="submit" disabled={!canRecordPayment}>Record</button>
         </form>
+        {lastReceipt && <div className="receipt-result"><strong>{lastReceipt.receiptNo}</strong><span>{lastReceipt.student} paid {ugx(lastReceipt.amount)}. Remaining balance: {ugx(lastReceipt.balance)}.</span></div>}
         <FinanceTable rows={paymentRows} headings={["Receipt", "Invoice", "Student", "Amount", "Method", "Paid"]} />
       </section>}
       {tab === "expenses" && <section className="operation-panel wide-panel">
         <div className="section-heading"><h3>Expenses</h3><span className="pill">{localExpenses.length} offline pending</span></div>
-        <form className="inline-form" onSubmit={(event) => void recordExpense(event)}>
-          <input placeholder="Category" value={expenseForm.category} onChange={(event) => setExpenseForm({ ...expenseForm, category: event.target.value })} required />
-          <input placeholder="Department" value={expenseForm.department} onChange={(event) => setExpenseForm({ ...expenseForm, department: event.target.value })} />
-          <input placeholder="Description" value={expenseForm.description} onChange={(event) => setExpenseForm({ ...expenseForm, description: event.target.value })} required />
-          <input type="number" min="1" step="1" placeholder="Amount" value={expenseForm.amount} onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })} required />
-          <input placeholder="Payee" value={expenseForm.payee} onChange={(event) => setExpenseForm({ ...expenseForm, payee: event.target.value })} />
+        <form className="inline-form finance-expense-form" onSubmit={(event) => void recordExpense(event)}>
+          <label>Category<input placeholder="Category" value={expenseForm.category} onChange={(event) => setExpenseForm({ ...expenseForm, category: event.target.value })} required /></label>
+          <label>Department<input placeholder="Department" value={expenseForm.department} onChange={(event) => setExpenseForm({ ...expenseForm, department: event.target.value })} /></label>
+          <label>Description<input placeholder="What was paid for?" value={expenseForm.description} onChange={(event) => setExpenseForm({ ...expenseForm, description: event.target.value })} required /></label>
+          <label>Amount<input type="number" min="1" step="1" placeholder="UGX amount" value={expenseForm.amount} onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })} required /></label>
+          <label>Budget<select value={expenseForm.budgetId} onChange={(event) => setExpenseForm({ ...expenseForm, budgetId: event.target.value })}><option value="">No budget linked</option>{budgets.map((budget) => <option key={budget.id} value={budget.id}>{budget.name} - {budget.department} ({ugx(Number(budget.amount) - Number(budget.spentAmount))} left)</option>)}</select></label>
+          <label>Payee<input placeholder="Supplier or staff member" value={expenseForm.payee} onChange={(event) => setExpenseForm({ ...expenseForm, payee: event.target.value })} /></label>
           <button type="submit" disabled={!canRecordExpense}>Record</button>
         </form>
-        <FinanceTable rows={expenses.map((expense) => [expense.expenseNo ?? "-", expense.category, expense.department ?? "-", ugx(expense.amount), expense.approvalStatus])} headings={["No.", "Category", "Department", "Amount", "Status"]} />
+        <FinanceTable rows={expenseRows} headings={["No.", "Category", "Department", "Amount", "Status"]} />
       </section>}
-      {tab === "reports" && <section className="operation-panel wide-panel"><div className="section-heading"><h3>Initial Reports</h3><button type="button" className="ghost no-print" onClick={printPage}>Print</button></div><FinanceTable rows={invoices.map((invoice) => [invoice.student.admissionNo, `${invoice.student.firstName} ${invoice.student.lastName}`, ugx(invoice.amount), ugx(invoice.amountPaid), ugx(invoice.balance)])} headings={["Admission", "Student", "Expected", "Paid", "Balance"]} /></section>}
+      {tab === "reports" && <section className="operation-panel wide-panel"><div className="section-heading"><h3>Initial Reports</h3><button type="button" className="ghost no-print" onClick={printPage}>Print Summary</button></div><FinanceTable rows={filteredInvoices.map((invoice) => [invoice.student.admissionNo, `${invoice.student.firstName} ${invoice.student.lastName}`, ugx(invoice.amount), ugx(invoice.amountPaid), ugx(invoice.balance), financeLabel(invoice.status)])} headings={["Admission", "Student", "Expected", "Paid", "Balance", "Status"]} /></section>}
     </section>
   );
 }
@@ -2870,10 +2950,10 @@ function DataTable({ label, compact = false, children }: { label: string; compac
 }
 
 function InvoiceTable({ invoices }: { invoices: InvoiceRecord[] }) {
-  return <DataTable label="Student invoices"><thead><tr><th>Invoice</th><th>Student</th><th>Expected</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td>{invoice.invoiceNo}</td><td>{invoice.student.admissionNo}<br /><small>{invoice.student.firstName} {invoice.student.lastName}</small></td><td>{ugx(invoice.amount)}</td><td>{ugx(invoice.amountPaid)}</td><td>{ugx(invoice.balance)}</td><td><span className="pill">{invoice.status}</span></td></tr>)}{invoices.length === 0 && <tr><td colSpan={6} className="empty">No invoices yet.</td></tr>}</tbody></DataTable>;
+  return <DataTable label="Student invoices"><thead><tr><th>Invoice</th><th>Student</th><th>Due</th><th>Expected</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td>{invoice.invoiceNo}</td><td>{invoice.student.admissionNo}<br /><small>{invoice.student.firstName} {invoice.student.lastName}</small></td><td>{dateOnly(invoice.dueDate)}</td><td>{ugx(invoice.amount)}</td><td>{ugx(invoice.amountPaid)}</td><td>{ugx(invoice.balance)}</td><td><span className={financeStatusClass(invoice.status)}>{financeLabel(invoice.status)}</span></td></tr>)}{invoices.length === 0 && <tr><td colSpan={7} className="empty">No invoices match this view.</td></tr>}</tbody></DataTable>;
 }
 
-function FinanceTable({ headings, rows }: { headings: string[]; rows: Array<Array<string | number>> }) {
+function FinanceTable({ headings, rows }: { headings: string[]; rows: Array<Array<React.ReactNode>> }) {
   return <DataTable label={headings.join(", ")}><thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="empty">No records to display.</td></tr>}</tbody></DataTable>;
 }
 
@@ -3301,6 +3381,34 @@ function formatAuditAction(action: string) {
 
 function formatEntityName(value: string) {
   return value.toLowerCase().replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function financeLabel(value: string | null | undefined) {
+  return value ? formatEntityName(value) : "Not Set";
+}
+
+function financeStatusClass(value: string | null | undefined) {
+  const status = (value ?? "").toUpperCase();
+  if (["PAID", "APPROVED", "ACTIVE"].includes(status)) return "pill success-pill";
+  if (["PARTIALLY_PAID", "PENDING", "SUBMITTED", "ISSUED"].includes(status)) return "pill warning-pill";
+  if (["OVERDUE", "REJECTED", "CANCELLED"].includes(status)) return "pill danger-pill";
+  return "pill muted-pill";
+}
+
+function uniqueValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((left, right) => left.localeCompare(right));
+}
+
+function defaultFinanceDueDate(config: SchoolConfig | null) {
+  const terms = config?.academicYears.flatMap((year) => year.terms) ?? [];
+  const currentTerm = terms.find((term) => term.id === config?.school.currentTermId) ?? terms.find((term) => term.isCurrent);
+  return currentTerm?.endsAt ? currentTerm.endsAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
+}
+
+function isOfflineCaptureError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message === "offline" || message.includes("failed to fetch") || message.includes("network") || message.includes("load failed");
 }
 
 function weekdayLabel(value: number | string) {
