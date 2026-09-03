@@ -131,6 +131,7 @@ export class AcademicsService {
             status,
             submittedBy: status === "SUBMITTED" ? actor.id : undefined,
             submittedAt: status === "SUBMITTED" ? now : undefined,
+            approvalStatus: status === "SUBMITTED" ? ApprovalStatus.Pending : ApprovalStatus.Draft,
             version: { increment: 1 },
             syncStatus: SyncStatus.Synced,
             lastSyncedAt: now
@@ -177,6 +178,12 @@ export class AcademicsService {
     const assessment = await this.prisma.assessment.findFirst({ where: { id, schoolId: actor.schoolId } });
     if (!assessment) throw new NotFoundException("Assessment not found.");
     await assertClassWithinAcademicLevelScope(this.prisma, actor, assessment.classId);
+    if (input.decision === "PUBLISHED" && assessment.status !== "APPROVED") {
+      throw new BadRequestException("Marks must be approved before publishing results.");
+    }
+    if (["APPROVED", "REJECTED", "RETURNED"].includes(input.decision) && assessment.status !== "SUBMITTED") {
+      throw new BadRequestException("Only submitted marks can be reviewed.");
+    }
     if (assessment.submittedBy === actor.id && ["APPROVED", "PUBLISHED"].includes(input.decision)) {
       throw new BadRequestException("A submitter cannot approve or publish their own marks.");
     }
@@ -221,7 +228,7 @@ export class AcademicsService {
     const marks = await this.prisma.mark.findMany({
       where: {
         schoolId: actor.schoolId,
-        status: { in: ["APPROVED", "PUBLISHED", "SUBMITTED"] },
+        status: { in: ["APPROVED", "PUBLISHED"] },
         assessment: { termId, examinationId: body.examinationId },
         ...(studentScope.length ? { student: { AND: studentScope } } : {})
       },

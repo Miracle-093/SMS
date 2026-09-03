@@ -1459,6 +1459,63 @@ td.row-actions {
   background: #fff8e4;
 }
 
+.marks-review-panel {
+  margin-top: 12px;
+}
+
+.workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf1f4;
+}
+
+.workflow-steps span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid #dfe6ec;
+  border-radius: 999px;
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.workflow-steps span.active {
+  background: #edf7f3;
+  border-color: #bfd9ce;
+  color: var(--forest);
+}
+
+.review-comment {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf1f4;
+  color: #354250;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.review-returned {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-top: 1px solid #edf1f4;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.review-returned strong {
+  color: var(--ink);
+}
+
 .inline-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
@@ -1651,6 +1708,7 @@ small {
   .setup-form,
   .setup-form.two-col,
   .roster-preview-form,
+  .workflow-steps,
   .workspace-scope-panel {
     grid-template-columns: 1fr;
   }

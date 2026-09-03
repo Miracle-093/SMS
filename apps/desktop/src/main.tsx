@@ -2316,6 +2316,8 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
   const [marksEntry, setMarksEntry] = useState<{ assessment: any; students: any[] } | null>(null);
   const [marksDraft, setMarksDraft] = useState<Record<string, { score: string; teacherComment: string }>>({});
   const [marksBusy, setMarksBusy] = useState(false);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewBusyId, setReviewBusyId] = useState("");
   const permissionSet = new Set(session.user.permissions);
   const canPrepareReports = permissionSet.has(PermissionKey.ReportCardsPrepare);
   const canPublishReports = permissionSet.has(PermissionKey.ReportCardsPublish);
@@ -2324,6 +2326,11 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
   const canEnterMarks = permissionSet.has(PermissionKey.MarksEntry);
   const marksProgress = marksEntry ? marksProgressFor(marksEntry.students, marksDraft, Number(marksEntry.assessment.maxScore)) : null;
   const selectedMarksEditable = marksEntry ? assessmentOpenForMarks(marksEntry.assessment.status) : false;
+  const canUseReviewQueue = canReviewMarks && !canEnterMarks;
+  const reviewQueue = assessments.filter((assessment) => assessment.status === "SUBMITTED");
+  const returnedAssessments = assessments.filter((assessment) => assessment.status === "RETURNED_FOR_CORRECTION");
+  const approvedAssessments = assessments.filter((assessment) => assessment.status === "APPROVED");
+  const publishedCards = cards.filter((item) => item.status === "PUBLISHED");
   async function load() {
     const [nextExams, nextAssessments, nextCards] = await Promise.all([api("/academics/examinations"), api("/academics/assessments"), api("/academics/report-cards")]);
     const examRows = asArray<any>(nextExams);
@@ -2385,9 +2392,24 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
     await load();
   }
   async function decideAssessment(id: string, decision: "APPROVED" | "REJECTED" | "RETURNED" | "PUBLISHED") {
-    await api(`/academics/assessments/${id}/decision`, { method: "POST", body: JSON.stringify({ decision, comment: `DOS ${decision.toLowerCase()} from workspace` }) });
-    setMessage(`Assessment ${decision.toLowerCase()} successfully.`);
-    await load();
+    const label = reviewDecisionLabel(decision);
+    if (decision === "PUBLISHED") {
+      const confirmed = window.confirm("Publish approved marks and generate report-card updates for this assessment?");
+      if (!confirmed) return;
+    }
+    if (decision === "RETURNED" && reviewComment.trim().length < 5) {
+      setMessage("Add a short return note so the teacher knows what to correct.");
+      return;
+    }
+    setReviewBusyId(id);
+    try {
+      await api(`/academics/assessments/${id}/decision`, { method: "POST", body: JSON.stringify({ decision, comment: reviewComment.trim() || `${label} from academic review queue` }) });
+      setReviewComment("");
+      setMessage(`Assessment ${label.toLowerCase()} successfully.`);
+      await load();
+    } finally {
+      setReviewBusyId("");
+    }
   }
   async function loadMarksEntry(assessmentId: string) {
     if (!assessmentId) {
@@ -2488,7 +2510,59 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
       </div>
     </div>
     {scope && <WorkspaceScopePanel summary={scope} />}
-    <div className="summary-strip"><span>Current term: {termName}</span><span>{assessments.filter((item) => item.status === "SUBMITTED").length} awaiting review</span><span>{cards.filter((item) => item.status === "PUBLISHED").length} published report cards</span></div>
+    <div className="summary-strip"><span>Current term: {termName}</span><span>{reviewQueue.length} awaiting review</span><span>{publishedCards.length} published report cards</span></div>
+    {canUseReviewQueue && <section className="operation-panel marks-review-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">DOS review queue</p>
+          <h3>Submitted Marks</h3>
+          <p className="panel-copy">Review teacher submissions inside your academic scope, then return, approve, or publish for reports.</p>
+        </div>
+        <button type="button" className="ghost" onClick={() => void load()}>Refresh Queue</button>
+      </div>
+      <div className="workflow-steps" aria-label="Academic review workflow">
+        {["Teacher draft", "Submitted", "DOS review", "Approved", "Published"].map((step, index) => <span key={step} className={index <= 2 ? "active" : ""}>{step}</span>)}
+      </div>
+      <label className="review-comment">
+        Review note
+        <textarea value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} placeholder="Optional for approval, required when returning marks." rows={3} />
+      </label>
+      <DataTable label="Submitted marks review queue">
+        <thead><tr><th>Assessment</th><th>Class</th><th>Marks</th><th>Submitted</th><th>Decision</th></tr></thead>
+        <tbody>
+          {reviewQueue.map((assessment) => <tr key={assessment.id}>
+            <td>{assessment.name}<br /><small>{assessment.subject?.name ?? "Subject"} - {assessment.examination?.name ?? "Exam"}</small></td>
+            <td>{assessmentPlacementLabel(config, assessment)}</td>
+            <td>{assessment.marks?.length ?? 0}</td>
+            <td>{assessment.submittedAt ? new Date(assessment.submittedAt).toLocaleString() : "Submitted"}</td>
+            <td className="row-actions">
+              <button type="button" disabled={reviewBusyId === assessment.id} onClick={() => void decideAssessment(assessment.id, "APPROVED")}>Approve Marks</button>
+              <button className="ghost" type="button" disabled={reviewBusyId === assessment.id} onClick={() => void decideAssessment(assessment.id, "RETURNED")}>Return</button>
+            </td>
+          </tr>)}
+          {reviewQueue.length === 0 && <tr><td colSpan={5} className="empty">No submitted marks are awaiting review in this workspace.</td></tr>}
+        </tbody>
+      </DataTable>
+      <DataTable label="Approved marks ready for publishing">
+        <thead><tr><th>Assessment</th><th>Class</th><th>Marks</th><th>Reviewed</th><th>Decision</th></tr></thead>
+        <tbody>
+          {approvedAssessments.map((assessment) => <tr key={assessment.id}>
+            <td>{assessment.name}<br /><small>{assessment.subject?.name ?? "Subject"} - {assessment.examination?.name ?? "Exam"}</small></td>
+            <td>{assessmentPlacementLabel(config, assessment)}</td>
+            <td>{assessment.marks?.length ?? 0}</td>
+            <td>{assessment.reviewedAt ? new Date(assessment.reviewedAt).toLocaleString() : "Approved"}</td>
+            <td className="row-actions">
+              <button type="button" disabled={reviewBusyId === assessment.id} onClick={() => void decideAssessment(assessment.id, "PUBLISHED")}>Publish Results</button>
+            </td>
+          </tr>)}
+          {approvedAssessments.length === 0 && <tr><td colSpan={5} className="empty">No approved marks are ready to publish.</td></tr>}
+        </tbody>
+      </DataTable>
+      {returnedAssessments.length > 0 && <div className="review-returned">
+        <strong>{returnedAssessments.length} returned assessment{returnedAssessments.length === 1 ? "" : "s"}</strong>
+        <span>Teachers can reopen returned rosters, correct scores, and submit again.</span>
+      </div>}
+    </section>}
     {canEnterMarks && <section className="operation-panel marks-entry-panel">
       <div className="section-heading">
         <div>
@@ -2760,6 +2834,13 @@ function marksProgressFor(students: any[], draft: Record<string, { score: string
 
 function assessmentOpenForMarks(status?: string | null) {
   return ["DRAFT", "OPEN", "MARKS_ENTRY", "RETURNED_FOR_CORRECTION"].includes((status ?? "DRAFT").toUpperCase());
+}
+
+function reviewDecisionLabel(decision: "APPROVED" | "REJECTED" | "RETURNED" | "PUBLISHED") {
+  if (decision === "RETURNED") return "Returned for correction";
+  if (decision === "PUBLISHED") return "Published";
+  if (decision === "REJECTED") return "Rejected";
+  return "Approved";
 }
 
 function assessmentPlacementLabel(config: SchoolConfig | null, assessment: { classId?: string | null; streamId?: string | null }) {
