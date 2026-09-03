@@ -17,6 +17,12 @@ export class StudentsController {
     return this.students.list(user, query);
   }
 
+  @Post("roster-import/preview")
+  @RequirePermissions(PermissionKey.StudentsRead)
+  previewRosterImport(@CurrentUserParam() user: CurrentUser, @Body() body: unknown) {
+    return this.students.previewRosterImport(user, body);
+  }
+
   @Get(":id")
   @RequirePermissions(PermissionKey.StudentsRead)
   profile(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {

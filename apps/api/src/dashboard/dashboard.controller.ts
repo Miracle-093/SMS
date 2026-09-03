@@ -28,4 +28,10 @@ export class DashboardController {
   recentActivity(@CurrentUserParam() user: CurrentUser) {
     return this.dashboard.recentActivity(user.schoolId);
   }
+
+  @Get("teacher-workspace")
+  @RequirePermissions(PermissionKey.DashboardRead)
+  teacherWorkspace(@CurrentUserParam() user: CurrentUser) {
+    return this.dashboard.teacherWorkspace(user);
+  }
 }

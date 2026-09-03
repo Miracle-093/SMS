@@ -102,6 +102,169 @@ export class DashboardService {
     return this.prisma.auditLog.findMany({ where: { schoolId, deletedAt: null }, orderBy: { createdAt: "desc" }, take: 30 });
   }
 
+  async teacherWorkspace(user: CurrentUser) {
+    const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: user.schoolId, userId: user.id } });
+    if (!teacher) {
+      return {
+        teacher: null,
+        classTeacherAssignments: [],
+        subjectAssignments: [],
+        classLearners: [],
+        openAssessments: [],
+        timetable: [],
+        announcements: []
+      };
+    }
+
+    const school = await this.prisma.school.findUnique({ where: { id: user.schoolId } });
+    const now = new Date();
+    const [classTeacherAssignments, subjectAssignments, timetable, announcements] = await Promise.all([
+      this.prisma.classTeacherAssignment.findMany({
+        where: { schoolId: user.schoolId, teacherId: teacher.id, isActive: true },
+        include: { class: true, stream: true, academicYear: true, term: true },
+        orderBy: { createdAt: "desc" }
+      }),
+      this.prisma.teacherSubjectAssignment.findMany({
+        where: { schoolId: user.schoolId, teacherId: teacher.id, isActive: true },
+        orderBy: { createdAt: "desc" }
+      }),
+      this.prisma.timetableEntry.findMany({
+        where: { schoolId: user.schoolId, teacherId: teacher.id, deletedAt: null, academicYearId: school?.currentAcademicYearId ?? undefined, termId: school?.currentTermId ?? undefined },
+        orderBy: [{ dayOfWeek: "asc" }, { periodNumber: "asc" }],
+        take: 30
+      }),
+      this.prisma.announcement.findMany({
+        where: {
+          schoolId: user.schoolId,
+          deletedAt: null,
+          publishAt: { lte: now },
+          OR: [
+            { expiresAt: null },
+            { expiresAt: { gte: now } }
+          ]
+        },
+        orderBy: [{ priority: "desc" }, { publishAt: "desc" }],
+        take: 10
+      })
+    ]);
+    const assessmentScopes = subjectAssignments.map((assignment) => ({
+      subjectId: assignment.subjectId,
+      classId: assignment.classId,
+      ...(assignment.streamId ? { streamId: assignment.streamId } : {})
+    }));
+    const openAssessments = await this.prisma.assessment.findMany({
+      where: {
+        schoolId: user.schoolId,
+        status: { in: ["DRAFT", "OPEN", "RETURNED_FOR_CORRECTION"] },
+        ...(school?.currentTermId ? { termId: school.currentTermId } : {}),
+        OR: [{ teacherId: teacher.id }, ...assessmentScopes]
+      },
+      include: { subject: true, examination: true },
+      orderBy: { updatedAt: "desc" },
+      take: 20
+    });
+
+    const classIds = new Set<string>();
+    const streamIds = new Set<string>();
+    const subjectIds = new Set<string>();
+    for (const assignment of subjectAssignments) {
+      classIds.add(assignment.classId);
+      if (assignment.streamId) streamIds.add(assignment.streamId);
+      subjectIds.add(assignment.subjectId);
+    }
+    for (const assignment of classTeacherAssignments) {
+      classIds.add(assignment.classId);
+      if (assignment.streamId) streamIds.add(assignment.streamId);
+    }
+    for (const entry of timetable) {
+      classIds.add(entry.classId);
+      if (entry.streamId) streamIds.add(entry.streamId);
+      subjectIds.add(entry.subjectId);
+    }
+    for (const assessment of openAssessments) {
+      if (assessment.classId) classIds.add(assessment.classId);
+      if (assessment.streamId) streamIds.add(assessment.streamId);
+      subjectIds.add(assessment.subjectId);
+    }
+
+    const [classes, streams, subjects] = await Promise.all([
+      this.prisma.class.findMany({ where: { schoolId: user.schoolId, id: { in: [...classIds] } } }),
+      this.prisma.stream.findMany({ where: { schoolId: user.schoolId, id: { in: [...streamIds] } } }),
+      this.prisma.subject.findMany({ where: { schoolId: user.schoolId, id: { in: [...subjectIds] } } })
+    ]);
+    const classById = new Map(classes.map((klass) => [klass.id, klass]));
+    const streamById = new Map(streams.map((stream) => [stream.id, stream]));
+    const subjectById = new Map(subjects.map((subject) => [subject.id, subject]));
+
+    const classScopes = [
+      ...classTeacherAssignments.map((assignment) => ({ classId: assignment.classId, streamId: assignment.streamId ?? null })),
+      ...subjectAssignments.map((assignment) => ({ classId: assignment.classId, streamId: assignment.streamId ?? null }))
+    ];
+    const uniqueScopes = Array.from(new Map(classScopes.map((scope) => [`${scope.classId}:${scope.streamId ?? "all"}`, scope])).values());
+    const classLearners = await Promise.all(uniqueScopes.map(async (scope) => ({
+      classId: scope.classId,
+      streamId: scope.streamId,
+      label: classStreamLabel(classById.get(scope.classId)?.name ?? "Class", scope.streamId ? streamById.get(scope.streamId)?.name : null),
+      activeStudents: await this.prisma.student.count({
+        where: { schoolId: user.schoolId, deletedAt: null, status: "ACTIVE", currentClassId: scope.classId, ...(scope.streamId ? { currentStreamId: scope.streamId } : {}) }
+      })
+    })));
+
+    const visibleAnnouncements = announcements.filter((announcement) => {
+      const audience = announcement.audience.toUpperCase();
+      if (["ALL", "STAFF", "TEACHERS", "TEACHER"].includes(audience)) return true;
+      if (announcement.classId && uniqueScopes.some((scope) => scope.classId === announcement.classId && (!announcement.streamId || !scope.streamId || scope.streamId === announcement.streamId))) return true;
+      return false;
+    });
+
+    return {
+      teacher: { id: teacher.id, staffId: teacher.staffId, firstName: teacher.firstName, lastName: teacher.lastName },
+      classTeacherAssignments: classTeacherAssignments.map((assignment) => ({
+        id: assignment.id,
+        classId: assignment.classId,
+        streamId: assignment.streamId,
+        label: classStreamLabel(assignment.class.name, assignment.stream?.name),
+        academicYear: assignment.academicYear.name,
+        term: assignment.term?.name ?? "All terms"
+      })),
+      subjectAssignments: subjectAssignments.map((assignment) => ({
+        id: assignment.id,
+        subjectId: assignment.subjectId,
+        classId: assignment.classId,
+        streamId: assignment.streamId,
+        subject: subjectById.get(assignment.subjectId)?.name ?? "Subject",
+        label: classStreamLabel(classById.get(assignment.classId)?.name ?? "Class", assignment.streamId ? streamById.get(assignment.streamId)?.name : null)
+      })),
+      classLearners,
+      openAssessments: openAssessments.map((assessment) => ({
+        id: assessment.id,
+        name: assessment.name,
+        status: assessment.status,
+        subject: assessment.subject.name,
+        examination: assessment.examination?.name ?? "Continuous assessment",
+        classId: assessment.classId,
+        streamId: assessment.streamId
+      })),
+      timetable: timetable.map((entry) => ({
+        id: entry.id,
+        dayOfWeek: entry.dayOfWeek,
+        periodNumber: entry.periodNumber,
+        startsAt: entry.startsAt,
+        endsAt: entry.endsAt,
+        room: entry.room,
+        subject: subjectById.get(entry.subjectId)?.name ?? "Subject",
+        class: classStreamLabel(classById.get(entry.classId)?.name ?? "Class", entry.streamId ? streamById.get(entry.streamId)?.name : null)
+      })),
+      announcements: visibleAnnouncements.map((announcement) => ({
+        id: announcement.id,
+        title: announcement.title,
+        message: announcement.message,
+        priority: announcement.priority,
+        publishAt: announcement.publishAt
+      }))
+    };
+  }
+
   private async lowStockCount(schoolId: string) {
     const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
       SELECT COUNT(*)::bigint AS count
@@ -112,6 +275,10 @@ export class DashboardService {
     `;
     return Number(rows[0]?.count ?? 0);
   }
+}
+
+function classStreamLabel(className: string, streamName?: string | null) {
+  return streamName ? `${className} ${streamName}` : className;
 }
 
 function money(value: { toNumber(): number } | number | string | null | undefined): number {

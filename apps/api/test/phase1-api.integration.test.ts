@@ -120,6 +120,55 @@ describe("Phase 1 core integration", () => {
     expect(rejected.status).toBe(400);
   }, 60_000);
 
+  it("scopes teacher workspace data and previews roster imports without creating students", async () => {
+    const workspace = await authGetAs(classTeacherToken, "/dashboard/teacher-workspace");
+    expect(workspace.teacher.staffId).toBe("TCH-001");
+    expect(workspace.classLearners.some((row: { classId: string; streamId?: string | null }) => row.classId === classOneId && row.streamId === streamId)).toBe(true);
+
+    const beforeCount = await prisma.student.count({ where: { schoolId } });
+    const preview = await authPostAs(classTeacherToken, "/students/roster-import/preview", {
+      classId: classOneId,
+      streamId,
+      rows: [
+        { admissionNo: "SAT-S1-001", firstName: "Existing", lastName: "Learner" },
+        { admissionNo: "TCH-PREVIEW-001", firstName: "Preview", lastName: "Learner" },
+        { admissionNo: "TCH-PREVIEW-001", firstName: "Duplicate", lastName: "Learner" },
+        { admissionNo: "TCH-PREVIEW-002", firstName: "", lastName: "Missing" }
+      ]
+    });
+    expect(preview.mode).toBe("PREVIEW_ONLY");
+    expect(preview.validRows.length).toBe(2);
+    expect(preview.errors.length).toBe(2);
+    expect(preview.existingMatches.some((match: { student: { admissionNo: string } }) => match.student.admissionNo === "SAT-S1-001")).toBe(true);
+    await expect(prisma.student.count({ where: { schoolId } })).resolves.toBe(beforeCount);
+
+    const outsideScope = await rawPost("/students/roster-import/preview", {
+      classId: classTwoId,
+      streamId: null,
+      rows: [{ admissionNo: "TCH-PREVIEW-003", firstName: "Outside", lastName: "Learner" }]
+    }, classTeacherToken);
+    expect(outsideScope.status).toBe(400);
+
+    const bursarPreview = await rawPost("/students/roster-import/preview", {
+      classId: classOneId,
+      streamId,
+      rows: [{ admissionNo: "BUR-PREVIEW-001", firstName: "Bursar", lastName: "Learner" }]
+    }, bursarToken);
+    expect(bursarPreview.status).toBe(400);
+
+    const portalLogin = await post("/auth/portal-login", {
+      username: "sat-s1-001",
+      password: "StudentPass123",
+      deviceId: "00000000-0000-4000-8000-000000000001"
+    });
+    const portalPreview = await rawPost("/students/roster-import/preview", {
+      classId: classOneId,
+      streamId,
+      rows: [{ admissionNo: "POR-PREVIEW-001", firstName: "Portal", lastName: "Learner" }]
+    }, portalLogin.accessToken);
+    expect(portalPreview.status).toBe(403);
+  }, 60_000);
+
   it("supports attendance review, correction approval, sync conflict review and audit browsing", async () => {
     const teacher = await prisma.teacher.findUniqueOrThrow({ where: { staffId: "TCH-001" } });
     const attendanceDate = new Date("2026-08-11T00:00:00.000Z");

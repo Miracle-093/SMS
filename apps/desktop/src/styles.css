@@ -1323,6 +1323,80 @@ td.row-actions {
   font-weight: 800;
 }
 
+.summary-strip strong {
+  margin-right: 6px;
+  color: var(--ink);
+}
+
+.teacher-dashboard .operation-panel {
+  align-self: start;
+}
+
+.subject-load {
+  padding: 12px 14px;
+}
+
+.announcement-stack {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.announcement-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #e2e8ee;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.announcement-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.roster-preview-panel {
+  margin-bottom: 12px;
+}
+
+.roster-preview-form {
+  display: grid;
+  grid-template-columns: minmax(190px, .35fr) minmax(260px, 1fr);
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf1f4;
+}
+
+.roster-preview-form label {
+  display: grid;
+  gap: 6px;
+  color: #354250;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.roster-preview-form .wide {
+  min-width: 0;
+}
+
+.roster-preview-form textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.roster-preview-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .inline-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
@@ -1514,6 +1588,7 @@ small {
   .setup-grid,
   .setup-form,
   .setup-form.two-col,
+  .roster-preview-form,
   .workspace-scope-panel {
     grid-template-columns: 1fr;
   }
@@ -1606,6 +1681,11 @@ small {
 
   .workflow-form {
     grid-template-columns: 1fr;
+  }
+
+  .roster-preview-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   button {

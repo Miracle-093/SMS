@@ -116,8 +116,8 @@ async function main() {
     "Lower School Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],
     "Middle School Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],
     "Upper School Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],
-    "Class Teacher": ["auth.login", "students.read", "academics.read", "marks.review", "report-cards.prepare", "attendance.manage"],
-    "Teacher": ["auth.login", "students.read", "attendance.manage", "academics.read", "marks.entry"],
+    "Class Teacher": ["auth.login", "dashboard.read", "students.read", "academics.read", "marks.review", "report-cards.prepare", "attendance.manage"],
+    "Teacher": ["auth.login", "dashboard.read", "students.read", "attendance.manage", "academics.read", "marks.entry"],
     "Bursar/Accountant": ["auth.login", "dashboard.read", "students.read", "finance.read", "finance.manage", "budget.manage", "payroll.read", "payroll.manage"],
     "Receptionist": ["auth.login", "students.read", "students.manage", "portal-credentials.reset"],
     "Student/Parent Portal User": ["auth.login", "portal.access"]

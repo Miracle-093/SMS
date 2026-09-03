@@ -180,6 +180,27 @@ type DashboardSummary = {
   portalLoginsToday?: number;
 };
 
+type TeacherWorkspaceSummary = {
+  teacher: { id: string; staffId: string; firstName: string; lastName: string } | null;
+  classTeacherAssignments: Array<{ id: string; classId: string; streamId?: string | null; label: string; academicYear: string; term: string }>;
+  subjectAssignments: Array<{ id: string; subjectId: string; classId: string; streamId?: string | null; subject: string; label: string }>;
+  classLearners: Array<{ classId: string; streamId?: string | null; label: string; activeStudents: number }>;
+  openAssessments: Array<{ id: string; name: string; status: string; subject: string; examination: string; classId?: string | null; streamId?: string | null }>;
+  timetable: Array<{ id: string; dayOfWeek: number; periodNumber: number; startsAt: string; endsAt: string; room?: string | null; subject: string; class: string }>;
+  announcements: Array<{ id: string; title: string; message: string; priority: string; publishAt: string }>;
+};
+
+type RosterPreviewResult = {
+  classId: string;
+  streamId?: string | null;
+  totalRows: number;
+  validRows: Array<{ admissionNo?: string; firstName: string; middleName?: string; lastName: string }>;
+  errors: Array<{ rowNumber: number; messages: string[]; row: { admissionNo?: string; firstName: string; middleName?: string; lastName: string } }>;
+  existingMatches: Array<{ row: { admissionNo?: string; firstName: string; middleName?: string; lastName: string }; student: { admissionNo: string; firstName: string; lastName: string } }>;
+  mode: "PREVIEW_ONLY";
+  nextStep: string;
+};
+
 type FinanceOverview = {
   expectedFees: number;
   collectedFees: number;
@@ -733,6 +754,9 @@ function App() {
             onStudentFilter={(filter) => setFilters((current) => ({ ...current, classId: filter.classId, streamId: filter.streamId ?? "" }))}
           />
         ) : null}
+        {workspaceScope?.studentFilters.length ? (
+          <RosterImportPreview api={api} scope={workspaceScope} setMessage={showMessage} />
+        ) : null}
         <section className="content-grid">
           <section className="list-pane">
             <div className="filters">
@@ -980,6 +1004,93 @@ function StudentForm({ form, setForm, config, onSubmit }: { form: RegistrationFo
       </fieldset>
       <button type="submit">Save Student</button>
     </form>
+  );
+}
+
+function RosterImportPreview({ api, scope, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; scope: WorkspaceScopeSummary; setMessage: (message: string) => void }) {
+  const [scopeKey, setScopeKey] = useState(() => rosterScopeKey(scope.studentFilters[0]));
+  const [rawRows, setRawRows] = useState("");
+  const [preview, setPreview] = useState<RosterPreviewResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const selectedScope = scope.studentFilters.find((filter) => rosterScopeKey(filter) === scopeKey) ?? scope.studentFilters[0];
+  const parsedRows = parseRosterRows(rawRows);
+  const canPreview = Boolean(selectedScope && parsedRows.length > 0 && !busy);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedScope || parsedRows.length === 0) {
+      setMessage("Choose an assigned class and paste at least one roster row.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api("/students/roster-import/preview", {
+        method: "POST",
+        body: JSON.stringify({ classId: selectedScope.classId, streamId: selectedScope.streamId ?? null, rows: parsedRows })
+      });
+      setPreview(result);
+      setMessage(`Roster preview checked ${result.totalRows} row${result.totalRows === 1 ? "" : "s"}. No student records were created.`);
+    } catch (error) {
+      setMessage(userMessage(error, "Roster preview failed."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="operation-panel wide-panel roster-preview-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Class roster preparation</p>
+          <h3>Import Preview</h3>
+          <p className="panel-copy">Paste a class list to check names, duplicate admission numbers, and assignment scope before DOS registration.</p>
+        </div>
+        {preview && <span className="pill">Preview only</span>}
+      </div>
+      <form className="roster-preview-form" onSubmit={(event) => void submit(event)}>
+        <label>
+          Assigned class
+          <select value={scopeKey} onChange={(event) => setScopeKey(event.target.value)}>
+            {scope.studentFilters.map((filter) => <option key={rosterScopeKey(filter)} value={rosterScopeKey(filter)}>{filter.label}</option>)}
+          </select>
+        </label>
+        <label className="wide">
+          Roster rows
+          <textarea
+            value={rawRows}
+            onChange={(event) => setRawRows(event.target.value)}
+            placeholder={"admissionNo, firstName, lastName, middleName\nSAT-S1-041, Amina, Kato\nSAT-S1-042, Brian, Ocen"}
+            rows={5}
+          />
+        </label>
+        <div className="roster-preview-actions">
+          <span>{parsedRows.length} parsed row{parsedRows.length === 1 ? "" : "s"}</span>
+          <button type="submit" disabled={!canPreview}>{busy ? "Checking..." : "Preview roster"}</button>
+        </div>
+      </form>
+      {preview && (
+        <>
+          <div className="summary-strip">
+            <span><strong>{preview.totalRows}</strong>Rows checked</span>
+            <span><strong>{preview.validRows.length}</strong>Ready rows</span>
+            <span><strong>{preview.errors.length}</strong>Rows needing edits</span>
+            <span><strong>{preview.existingMatches.length}</strong>Existing matches</span>
+          </div>
+          <DataTable label="Roster preview results" compact>
+            <thead><tr><th>Row</th><th>Admission</th><th>Name</th><th>Status</th></tr></thead>
+            <tbody>
+              {preview.validRows.map((row, index) => {
+                const match = row.admissionNo ? preview.existingMatches.find((item) => item.row.admissionNo === row.admissionNo) : undefined;
+                return <tr key={`${row.admissionNo ?? row.firstName}-${index}`}><td>{index + 1}</td><td>{row.admissionNo ?? "Not provided"}</td><td>{row.firstName} {row.middleName ?? ""} {row.lastName}</td><td><span className="pill">{match ? "Existing student" : "Ready for DOS review"}</span></td></tr>;
+              })}
+              {preview.errors.map((error) => <tr key={`error-${error.rowNumber}`}><td>{error.rowNumber}</td><td>{error.row.admissionNo ?? "Not provided"}</td><td>{error.row.firstName} {error.row.lastName}</td><td>{error.messages.join(" ")}</td></tr>)}
+              {preview.totalRows === 0 && <tr><td colSpan={4} className="empty">No roster rows were parsed.</td></tr>}
+            </tbody>
+          </DataTable>
+          <p className="panel-copy">{preview.nextStep}</p>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -1376,13 +1487,21 @@ function fromStudent(student: Student, config: SchoolConfig | null): Registratio
 
 function DashboardView({ api, session, online, pendingCount, lastSync, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; session: Session; online: boolean; pendingCount: number; lastSync: string; setMessage: (message: string) => void }) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [teacherWorkspace, setTeacherWorkspace] = useState<TeacherWorkspaceSummary | null>(null);
   const [summaryState, setSummaryState] = useState<MetricState>("loading");
   const [alerts, setAlerts] = useState<Array<{ type: string; title: string; severity?: string; createdAt: string }>>([]);
   const [activity, setActivity] = useState<AuditRecord[]>([]);
+  const teachingWorkspace = isTeachingWorkspace(session.user);
 
   async function load() {
     setSummaryState(summary ? "ready" : "loading");
     try {
+      if (teachingWorkspace) {
+        const nextWorkspace = await api("/dashboard/teacher-workspace");
+        setTeacherWorkspace(nextWorkspace);
+        setSummaryState("ready");
+        return;
+      }
       const [nextSummary, nextAlerts, nextActivity] = await Promise.all([
         api("/dashboard/summary"),
         api("/dashboard/alerts"),
@@ -1435,6 +1554,19 @@ function DashboardView({ api, session, online, pendingCount, lastSync, setMessag
   ];
   const cards = financeOnly ? financeCards : allCards;
 
+  if (teachingWorkspace) {
+    return (
+      <TeacherWorkspaceDashboard
+        workspace={teacherWorkspace}
+        state={summaryState}
+        online={online}
+        pendingCount={pendingCount}
+        lastSync={lastSync}
+        onRefresh={() => void load()}
+      />
+    );
+  }
+
   return (
     <section className="dashboard-grid">
       {!online && <div className="notice stale">Offline. Figures are from the last synchronized cache where available. Last sync: {lastSync}. Pending local changes: {pendingCount}.</div>}
@@ -1467,6 +1599,95 @@ function DashboardView({ api, session, online, pendingCount, lastSync, setMessag
           </tbody>
         </DataTable>
       </section>}
+    </section>
+  );
+}
+
+function TeacherWorkspaceDashboard({ workspace, state, online, pendingCount, lastSync, onRefresh }: { workspace: TeacherWorkspaceSummary | null; state: MetricState; online: boolean; pendingCount: number; lastSync: string; onRefresh: () => void }) {
+  const today = new Date().getDay() || 7;
+  const todayLessons = workspace?.timetable.filter((entry) => entry.dayOfWeek === today) ?? [];
+  const cards = [
+    ["Class rooms", countMetric(workspace?.classLearners.length, state)],
+    ["Assigned subjects", countMetric(workspace?.subjectAssignments.length, state)],
+    ["Open assessments", countMetric(workspace?.openAssessments.length, state)],
+    ["Today lessons", countMetric(todayLessons.length, state)],
+    ["Staff notices", countMetric(workspace?.announcements.length, state)]
+  ];
+  return (
+    <section className="dashboard-grid teacher-dashboard">
+      {!online && <div className="notice stale">Offline. Teacher workspace data is from the last available request. Last sync: {lastSync}. Pending local changes: {pendingCount}.</div>}
+      <section className="operation-panel wide-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">My teaching workspace</p>
+            <h3>{workspace?.teacher ? `${workspace.teacher.firstName} ${workspace.teacher.lastName}` : "Teacher workspace"}</h3>
+            <p className="panel-copy">Assigned classes, subject load, timetable, assessments, and staff announcements.</p>
+          </div>
+          <button type="button" onClick={onRefresh}>Refresh</button>
+        </div>
+        <div className="summary-strip">
+          {cards.map(([label, value]) => <span key={label}><strong>{value}</strong>{label}</span>)}
+        </div>
+      </section>
+
+      <section className="operation-panel">
+        <div className="section-heading"><h3>Assigned Classes</h3></div>
+        <DataTable label="Assigned class learner counts" compact>
+          <thead><tr><th>Class</th><th>Active learners</th></tr></thead>
+          <tbody>
+            {(workspace?.classLearners ?? []).map((row) => <tr key={`${row.classId}-${row.streamId ?? "all"}`}><td>{row.label}</td><td>{row.activeStudents}</td></tr>)}
+            {state === "loading" && <tr><td colSpan={2} className="empty">Loading class assignments...</td></tr>}
+            {state !== "loading" && (workspace?.classLearners ?? []).length === 0 && <tr><td colSpan={2} className="empty">No class or subject assignments have been linked to this login.</td></tr>}
+          </tbody>
+        </DataTable>
+      </section>
+
+      <section className="operation-panel">
+        <div className="section-heading"><h3>Subject Load</h3></div>
+        <div className="pill-stack subject-load">
+          {(workspace?.subjectAssignments ?? []).map((assignment) => <span className="pill" key={assignment.id}>{assignment.subject} - {assignment.label}</span>)}
+          {state !== "loading" && (workspace?.subjectAssignments ?? []).length === 0 && <span className="muted-text">No assigned subjects yet.</span>}
+        </div>
+      </section>
+
+      <section className="operation-panel wide-panel">
+        <div className="section-heading"><h3>Open Assessments</h3></div>
+        <DataTable label="Open teacher assessments">
+          <thead><tr><th>Assessment</th><th>Subject</th><th>Exam</th><th>Status</th></tr></thead>
+          <tbody>
+            {(workspace?.openAssessments ?? []).map((assessment) => <tr key={assessment.id}><td>{assessment.name}</td><td>{assessment.subject}</td><td>{assessment.examination}</td><td><span className="pill">{assessment.status}</span></td></tr>)}
+            {state === "loading" && <tr><td colSpan={4} className="empty">Loading assessments...</td></tr>}
+            {state !== "loading" && (workspace?.openAssessments ?? []).length === 0 && <tr><td colSpan={4} className="empty">No open assessments need marks entry right now.</td></tr>}
+          </tbody>
+        </DataTable>
+      </section>
+
+      <section className="operation-panel">
+        <div className="section-heading"><h3>Today</h3></div>
+        <DataTable label="Today timetable" compact>
+          <thead><tr><th>Time</th><th>Lesson</th></tr></thead>
+          <tbody>
+            {todayLessons.map((entry) => <tr key={entry.id}><td>{entry.startsAt}-{entry.endsAt}</td><td>{entry.subject}<br /><small>{entry.class}{entry.room ? `, ${entry.room}` : ""}</small></td></tr>)}
+            {state === "loading" && <tr><td colSpan={2} className="empty">Loading timetable...</td></tr>}
+            {state !== "loading" && todayLessons.length === 0 && <tr><td colSpan={2} className="empty">No lessons are scheduled for today.</td></tr>}
+          </tbody>
+        </DataTable>
+      </section>
+
+      <section className="operation-panel">
+        <div className="section-heading"><h3>Staff Announcements</h3></div>
+        <div className="announcement-stack">
+          {(workspace?.announcements ?? []).map((announcement) => (
+            <article key={announcement.id} className="announcement-card">
+              <span className="pill">{announcement.priority}</span>
+              <strong>{announcement.title}</strong>
+              <p>{announcement.message}</p>
+              <small>{dateOnly(announcement.publishAt)}</small>
+            </article>
+          ))}
+          {state !== "loading" && (workspace?.announcements ?? []).length === 0 && <div className="empty">No current staff announcements.</div>}
+        </div>
+      </section>
     </section>
   );
 }
@@ -2439,6 +2660,35 @@ function asArray<T>(value: unknown): T[] {
 function sectionsForUser(permissions: string[]) {
   const permissionSet = new Set(permissions);
   return appSections.filter((section) => section.permissions.some((permission) => permissionSet.has(permission)));
+}
+
+function isTeachingWorkspace(user: Session["user"]) {
+  const roles = user.roles.map(normalizeRoleName);
+  return roles.includes("teacher") || roles.includes("class teacher");
+}
+
+function rosterScopeKey(filter: StudentQuickFilter | undefined) {
+  return filter ? `${filter.classId}:${filter.streamId ?? ""}` : "";
+}
+
+function parseRosterRows(value: string) {
+  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const rows = lines.filter((line, index) => {
+    const normalized = line.toLowerCase().replace(/\s/g, "");
+    return !(index === 0 && normalized.includes("firstname") && normalized.includes("lastname"));
+  });
+  return rows.map((line) => {
+    const cells = line.split(",").map((cell) => cell.trim());
+    if (cells.length === 2) {
+      return { firstName: cells[0] ?? "", lastName: cells[1] ?? "" };
+    }
+    return {
+      admissionNo: cells[0] || undefined,
+      firstName: cells[1] ?? "",
+      lastName: cells[2] ?? "",
+      middleName: cells[3] || undefined
+    };
+  });
 }
 
 function workspaceScopeFor(user: Session["user"], config: SchoolConfig): WorkspaceScopeSummary | null {

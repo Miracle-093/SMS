@@ -67,6 +67,52 @@ export class StudentsService {
     return this.createRegistration(actor.schoolId, actor.id, body, null);
   }
 
+  async previewRosterImport(actor: CurrentUser, body: unknown) {
+    const input = parseRosterPreview(body);
+    await this.assertRosterPreviewScope(actor, input.classId, input.streamId);
+
+    const admissionNumbers = input.rows.map((row) => row.admissionNo).filter((value): value is string => Boolean(value));
+    const existing = admissionNumbers.length
+      ? await this.prisma.student.findMany({
+          where: { schoolId: actor.schoolId, admissionNo: { in: admissionNumbers } },
+          select: { admissionNo: true, firstName: true, lastName: true, currentClassId: true, currentStreamId: true }
+        })
+      : [];
+    const existingByAdmission = new Map(existing.map((student) => [student.admissionNo.toUpperCase(), student]));
+    const seenAdmissions = new Set<string>();
+    const validRows: RosterPreviewRow[] = [];
+    const errors: RosterPreviewError[] = [];
+
+    input.rows.forEach((row, index) => {
+      const rowErrors: string[] = [];
+      if (!row.firstName) rowErrors.push("First name is required.");
+      if (!row.lastName) rowErrors.push("Last name is required.");
+      if (row.admissionNo) {
+        const key = row.admissionNo.toUpperCase();
+        if (seenAdmissions.has(key)) rowErrors.push("Admission number is repeated in this import.");
+        seenAdmissions.add(key);
+      }
+      if (rowErrors.length) {
+        errors.push({ rowNumber: index + 1, messages: rowErrors, row });
+      } else {
+        validRows.push(row);
+      }
+    });
+
+    return {
+      classId: input.classId,
+      streamId: input.streamId,
+      totalRows: input.rows.length,
+      validRows,
+      errors,
+      existingMatches: validRows
+        .filter((row) => row.admissionNo && existingByAdmission.has(row.admissionNo.toUpperCase()))
+        .map((row) => ({ row, student: existingByAdmission.get(row.admissionNo!.toUpperCase()) })),
+      mode: "PREVIEW_ONLY",
+      nextStep: "Reviewed rows can be registered by DOS or an administrator with admissions permission."
+    };
+  }
+
   async createRegistration(schoolId: string, actorId: string | null, body: unknown, deviceId: string | null) {
     const input = studentRegistrationSchema.parse(body);
     if (input.schoolId !== schoolId) {
@@ -289,6 +335,62 @@ export class StudentsService {
     }
   }
 
+  private async assertRosterPreviewScope(actor: CurrentUser, classId: string, streamId: string | null) {
+    await this.validateClassStream(actor.schoolId, classId, streamId);
+    const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
+    if (scopedClassIds && !scopedClassIds.includes(classId)) {
+      throw new BadRequestException("This class is outside your academic office scope.");
+    }
+    const permissions = new Set(actor.permissions);
+    if (
+      permissions.has(PermissionKey.AdmissionsManage) ||
+      permissions.has(PermissionKey.AcademicSetupManage)
+    ) {
+      return;
+    }
+    if (scopedClassIds) return;
+    const school = await this.prisma.school.findUnique({ where: { id: actor.schoolId } });
+    const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
+    if (!teacher) {
+      throw new BadRequestException("Only assigned teachers can preview class rosters.");
+    }
+    const streamCondition = streamId ? [{ streamId }, { streamId: null }] : [{ streamId: null }];
+    const [subjectAssignment, classAssignment] = await Promise.all([
+      this.prisma.teacherSubjectAssignment.findFirst({
+        where: { schoolId: actor.schoolId, teacherId: teacher.id, classId, isActive: true, OR: streamCondition }
+      }),
+      this.prisma.classTeacherAssignment.findFirst({
+        where: {
+          schoolId: actor.schoolId,
+          teacherId: teacher.id,
+          classId,
+          isActive: true,
+          ...(school?.currentAcademicYearId ? { academicYearId: school.currentAcademicYearId } : {}),
+          AND: [
+            { OR: streamCondition },
+            school?.currentTermId ? { OR: [{ termId: null }, { termId: school.currentTermId }] } : {}
+          ]
+        }
+      })
+    ]);
+    if (!subjectAssignment && !classAssignment) {
+      throw new BadRequestException("This roster is outside your assigned class or subject workspace.");
+    }
+  }
+
+  private async validateClassStream(schoolId: string, classId: string, streamId: string | null) {
+    const klass = await this.prisma.class.findFirst({ where: { id: classId, schoolId } });
+    if (!klass) {
+      throw new BadRequestException("Class must belong to this school.");
+    }
+    if (streamId) {
+      const stream = await this.prisma.stream.findFirst({ where: { id: streamId, classId, schoolId } });
+      if (!stream) {
+        throw new BadRequestException("Stream must belong to the selected class.");
+      }
+    }
+  }
+
   private async studentVisibility(actor: CurrentUser): Promise<Prisma.StudentWhereInput[]> {
     const permissions = new Set(actor.permissions);
     const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
@@ -313,4 +415,50 @@ export class StudentsService {
     }));
     return ownership.length ? [{ OR: ownership }] : [{ id: "__no_students_for_user__" }];
   }
+}
+
+type RosterPreviewRow = {
+  admissionNo?: string;
+  firstName: string;
+  middleName?: string;
+  lastName: string;
+};
+
+type RosterPreviewError = {
+  rowNumber: number;
+  messages: string[];
+  row: RosterPreviewRow;
+};
+
+function parseRosterPreview(body: unknown): { classId: string; streamId: string | null; rows: RosterPreviewRow[] } {
+  const input = body as { classId?: unknown; streamId?: unknown; rows?: unknown };
+  if (typeof input?.classId !== "string" || !input.classId) {
+    throw new BadRequestException("Choose a class before previewing a roster import.");
+  }
+  if (!Array.isArray(input.rows)) {
+    throw new BadRequestException("Roster import preview expects a list of rows.");
+  }
+  if (input.rows.length === 0) {
+    throw new BadRequestException("Add at least one student row to preview.");
+  }
+  if (input.rows.length > 200) {
+    throw new BadRequestException("Preview up to 200 student rows at a time.");
+  }
+  return {
+    classId: input.classId.trim(),
+    streamId: typeof input.streamId === "string" && input.streamId.trim() ? input.streamId.trim() : null,
+    rows: input.rows.map((row) => {
+      const record = row as Record<string, unknown>;
+      return {
+        admissionNo: text(record.admissionNo),
+        firstName: text(record.firstName) ?? "",
+        middleName: text(record.middleName),
+        lastName: text(record.lastName) ?? ""
+      };
+    })
+  };
+}
+
+function text(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
