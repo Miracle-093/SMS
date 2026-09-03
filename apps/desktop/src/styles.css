@@ -1397,6 +1397,68 @@ td.row-actions {
   font-size: 13px;
 }
 
+.marks-context-card {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #dfe6ec;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.marks-context-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.marks-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf1f4;
+}
+
+.marks-progress div {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #e1e8ee;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.marks-progress strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.marks-progress span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.invalid-input {
+  border-color: #c2410c !important;
+  box-shadow: 0 0 0 3px rgba(194, 65, 12, .12) !important;
+}
+
+.danger-pill {
+  background: #fff1f2;
+  color: #991b1b;
+  border-color: #fecdd3;
+}
+
+.muted-pill {
+  background: #eef2f4;
+  color: #5f6c78;
+}
+
+.selected-row td {
+  background: #fff8e4;
+}
+
 .inline-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));

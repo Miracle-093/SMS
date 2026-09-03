@@ -2322,6 +2322,8 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
   const canManageAcademics = permissionSet.has(PermissionKey.AcademicsManage);
   const canReviewMarks = permissionSet.has(PermissionKey.MarksReview);
   const canEnterMarks = permissionSet.has(PermissionKey.MarksEntry);
+  const marksProgress = marksEntry ? marksProgressFor(marksEntry.students, marksDraft, Number(marksEntry.assessment.maxScore)) : null;
+  const selectedMarksEditable = marksEntry ? assessmentOpenForMarks(marksEntry.assessment.status) : false;
   async function load() {
     const [nextExams, nextAssessments, nextCards] = await Promise.all([api("/academics/examinations"), api("/academics/assessments"), api("/academics/report-cards")]);
     const examRows = asArray<any>(nextExams);
@@ -2416,21 +2418,41 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
   }
   async function submitMarks(status: "DRAFT" | "SUBMITTED") {
     if (!marksEntry) return;
+    if (!assessmentOpenForMarks(marksEntry.assessment.status)) {
+      setMessage("This assessment is not open for marks editing.");
+      return;
+    }
     const maxScore = Number(marksEntry.assessment.maxScore);
     const entries = marksEntry.students
-      .map((student) => ({ studentId: student.id, score: Number(marksDraft[student.id]?.score), teacherComment: marksDraft[student.id]?.teacherComment?.trim() || null }))
-      .filter((entry) => Number.isFinite(entry.score));
+      .map((student) => {
+        const scoreText = marksDraft[student.id]?.score?.trim() ?? "";
+        return {
+          studentId: student.id,
+          scoreText,
+          score: scoreText === "" ? null : Number(scoreText),
+          teacherComment: marksDraft[student.id]?.teacherComment?.trim() || null
+        };
+      })
+      .filter((entry) => entry.scoreText !== "");
     if (entries.length === 0) {
       setMessage("Enter at least one score before saving marks.");
       return;
     }
-    if (entries.some((entry) => entry.score < 0 || entry.score > maxScore)) {
+    if (entries.some((entry) => entry.score === null || !Number.isFinite(entry.score) || entry.score < 0 || entry.score > maxScore)) {
       setMessage(`Scores must be between 0 and ${maxScore}.`);
       return;
     }
+    if (status === "SUBMITTED") {
+      if (entries.length < marksEntry.students.length) {
+        setMessage(`Enter all ${marksEntry.students.length} scores before submitting for DOS review. Save Draft can be partial.`);
+        return;
+      }
+      const confirmed = window.confirm(`Submit ${entries.length} mark${entries.length === 1 ? "" : "s"} for DOS review? You can continue editing only if the result is returned for correction.`);
+      if (!confirmed) return;
+    }
     setMarksBusy(true);
     try {
-      await api("/academics/marks", { method: "POST", body: JSON.stringify({ assessmentId: marksEntry.assessment.id, entries, status, deviceId }) });
+      await api("/academics/marks", { method: "POST", body: JSON.stringify({ assessmentId: marksEntry.assessment.id, entries: entries.map((entry) => ({ studentId: entry.studentId, score: entry.score, teacherComment: entry.teacherComment })), status, deviceId }) });
       setMessage(status === "SUBMITTED" ? "Marks submitted for DOS review." : "Marks draft saved.");
       await load();
       await loadMarksEntry(marksEntry.assessment.id);
@@ -2469,28 +2491,57 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
     <div className="summary-strip"><span>Current term: {termName}</span><span>{assessments.filter((item) => item.status === "SUBMITTED").length} awaiting review</span><span>{cards.filter((item) => item.status === "PUBLISHED").length} published report cards</span></div>
     {canEnterMarks && <section className="operation-panel marks-entry-panel">
       <div className="section-heading">
-        <h3>Marks Entry</h3>
+        <div>
+          <p className="eyebrow">My assessments</p>
+          <h3>Marks Entry</h3>
+          <p className="panel-copy">Choose an assigned assessment, enter scores against the official roster, save draft, then submit for DOS review.</p>
+        </div>
         <div className="row-actions">
           <button type="button" className="ghost" onClick={() => void loadMarksEntry(selectedAssessmentId)} disabled={!selectedAssessmentId || marksBusy}>Reload Roster</button>
-          <button type="button" className="ghost" onClick={() => void submitMarks("DRAFT")} disabled={!marksEntry || marksBusy}>Save Draft</button>
-          <button type="button" onClick={() => void submitMarks("SUBMITTED")} disabled={!marksEntry || marksBusy}>Submit Marks</button>
+          <button type="button" className="ghost" onClick={() => void submitMarks("DRAFT")} disabled={!marksEntry || marksBusy || !selectedMarksEditable}>Save Draft</button>
+          <button type="button" onClick={() => void submitMarks("SUBMITTED")} disabled={!marksEntry || marksBusy || !selectedMarksEditable || Boolean(marksProgress?.invalid) || Boolean(marksProgress && marksProgress.entered < marksProgress.total)}>Submit for Review</button>
         </div>
       </div>
       <div className="marks-entry-toolbar">
         <label>Assessment<select value={selectedAssessmentId} onChange={(event) => void chooseMarksAssessment(event.target.value)}><option value="">Select assessment</option>{assessments.map((assessment) => <option key={assessment.id} value={assessment.id}>{assessment.name} - {assessment.subject?.name ?? "Subject"} ({assessment.status ?? "DRAFT"})</option>)}</select></label>
-        <div><strong>{marksEntry?.assessment?.subject?.name ?? "No subject selected"}</strong><span>Max score: {marksEntry ? String(marksEntry.assessment.maxScore) : "-"}</span></div>
+        <div className="marks-context-card">
+          <strong>{marksEntry?.assessment?.name ?? "No assessment selected"}</strong>
+          <span>{marksEntry?.assessment?.subject?.name ?? "Choose an assessment"}{marksEntry ? ` - ${assessmentPlacementLabel(config, marksEntry.assessment)}` : ""}</span>
+          <span>Max score: {marksEntry ? String(marksEntry.assessment.maxScore) : "Not selected"}</span>
+        </div>
       </div>
+      {marksProgress && <div className="marks-progress" aria-label="Marks entry progress">
+        <div>
+          <strong>{marksProgress.entered}/{marksProgress.total}</strong>
+          <span>scores entered</span>
+        </div>
+        <div>
+          <strong>{marksProgress.invalid}</strong>
+          <span>invalid score{marksProgress.invalid === 1 ? "" : "s"}</span>
+        </div>
+        <div>
+          <strong>{marksProgress.saved}</strong>
+          <span>already saved</span>
+        </div>
+      </div>}
       <DataTable label="Teacher marks entry" compact>
-        <thead><tr><th>Student</th><th>Current Score</th><th>Score</th><th>Comment</th></tr></thead>
+        <thead><tr><th>Student</th><th>Saved</th><th>Score</th><th>Comment</th><th>State</th></tr></thead>
         <tbody>
-          {marksEntry?.students.map((student) => <tr key={student.id}>
+          {marksEntry?.students.map((student) => {
+            const score = marksDraft[student.id]?.score ?? "";
+            const maxScore = Number(marksEntry.assessment.maxScore);
+            const numericScore = Number(score);
+            const invalid = score.trim() !== "" && (!Number.isFinite(numericScore) || numericScore < 0 || numericScore > maxScore);
+            return <tr key={student.id}>
             <td>{student.admissionNo}<br /><small>{student.firstName} {student.lastName}</small></td>
-            <td>{student.mark?.score ?? "-"}</td>
-            <td><input className="compact-input" type="number" min="0" max={Number(marksEntry.assessment.maxScore)} value={marksDraft[student.id]?.score ?? ""} onChange={(event) => updateMarkDraft(student.id, { score: event.target.value })} /></td>
-            <td><input value={marksDraft[student.id]?.teacherComment ?? ""} onChange={(event) => updateMarkDraft(student.id, { teacherComment: event.target.value })} placeholder="Optional note" /></td>
-          </tr>)}
-          {!marksEntry && <tr><td colSpan={4} className="empty">Select an assigned assessment to enter marks.</td></tr>}
-          {marksEntry && marksEntry.students.length === 0 && <tr><td colSpan={4} className="empty">No active students are available for this assessment roster.</td></tr>}
+            <td>{student.mark?.score ?? "Not saved"}</td>
+            <td><input aria-label={`Score for ${student.firstName} ${student.lastName}`} className={invalid ? "compact-input invalid-input" : "compact-input"} type="number" min="0" max={maxScore} value={score} disabled={!selectedMarksEditable} onChange={(event) => updateMarkDraft(student.id, { score: event.target.value })} /></td>
+            <td><input aria-label={`Comment for ${student.firstName} ${student.lastName}`} value={marksDraft[student.id]?.teacherComment ?? ""} disabled={!selectedMarksEditable} onChange={(event) => updateMarkDraft(student.id, { teacherComment: event.target.value })} placeholder="Optional note" /></td>
+            <td><span className={invalid ? "pill danger-pill" : score ? "pill" : "pill muted-pill"}>{invalid ? `0-${maxScore} only` : student.mark?.status ?? (score ? "Unsaved" : "Empty")}</span></td>
+          </tr>;
+          })}
+          {!marksEntry && <tr><td colSpan={5} className="empty">Select an assigned assessment to enter marks.</td></tr>}
+          {marksEntry && marksEntry.students.length === 0 && <tr><td colSpan={5} className="empty">No active students are available for this assessment roster.</td></tr>}
         </tbody>
       </DataTable>
     </section>}
@@ -2520,8 +2571,11 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
       {exams.map((exam) => <tr key={exam.id}><td>{exam.name}</td><td>{exam.examinationType ?? "-"}</td><td><span className="pill">{exam.status ?? "-"}</span></td><td>{dateOnly(exam.startsAt)} - {dateOnly(exam.endsAt)}</td><td>{exam.assessments?.length ?? 0}</td></tr>)}
       {exams.length === 0 && <tr><td colSpan={5} className="empty">No examinations created yet.</td></tr>}
     </tbody></DataTable>
-    <DataTable label="Assessments"><thead><tr><th>Assessment</th><th>Subject</th><th>Status</th><th>Marks</th><th>Action</th></tr></thead><tbody>
-      {assessments.map((item) => <tr key={item.id}><td>{item.name}<br /><small>{item.examination?.name ?? "-"}</small></td><td>{item.subject?.name ?? "-"}</td><td><span className="pill">{item.status ?? "-"}</span></td><td>{item.marks?.length ?? 0}</td><td className="row-actions">{canEnterMarks ? <button type="button" className="ghost" onClick={() => void chooseMarksAssessment(item.id)}>Enter Marks</button> : canReviewMarks && item.status === "SUBMITTED" ? <><button type="button" onClick={() => void decideAssessment(item.id, "APPROVED")}>Approve</button><button className="ghost" type="button" onClick={() => void decideAssessment(item.id, "RETURNED")}>Return</button><button className="ghost" type="button" onClick={() => void decideAssessment(item.id, "PUBLISHED")}>Publish</button></> : "-"}</td></tr>)}
+    <DataTable label={canEnterMarks && !canManageAcademics ? "My assessment queue" : "Assessments"}><thead><tr><th>Assessment</th><th>Subject</th><th>Status</th><th>Marks</th><th>Action</th></tr></thead><tbody>
+      {assessments.map((item) => {
+        const canOpenRoster = canEnterMarks && assessmentOpenForMarks(item.status);
+        return <tr key={item.id} className={item.id === selectedAssessmentId ? "selected-row" : undefined}><td>{item.name}<br /><small>{item.examination?.name ?? "-"}</small></td><td>{item.subject?.name ?? "-"}</td><td><span className="pill">{item.status ?? "-"}</span></td><td>{item.marks?.length ?? 0}</td><td className="row-actions">{canEnterMarks ? <button type="button" className="ghost" disabled={!canOpenRoster} onClick={() => void chooseMarksAssessment(item.id)}>{canOpenRoster ? "Open Roster" : "Closed"}</button> : canReviewMarks && item.status === "SUBMITTED" ? <><button type="button" onClick={() => void decideAssessment(item.id, "APPROVED")}>Approve</button><button className="ghost" type="button" onClick={() => void decideAssessment(item.id, "RETURNED")}>Return</button><button className="ghost" type="button" onClick={() => void decideAssessment(item.id, "PUBLISHED")}>Publish</button></> : "-"}</td></tr>;
+      })}
       {assessments.length === 0 && <tr><td colSpan={5} className="empty">No assessments created yet.</td></tr>}
     </tbody></DataTable>
     <DataTable label="Report cards"><thead><tr><th>Student</th><th>Grade</th><th>Average</th><th>Status</th><th>DOS action</th></tr></thead><tbody>
@@ -2689,6 +2743,28 @@ function parseRosterRows(value: string) {
       middleName: cells[3] || undefined
     };
   });
+}
+
+function marksProgressFor(students: any[], draft: Record<string, { score: string; teacherComment: string }>, maxScore: number) {
+  const total = students.length;
+  const entered = students.filter((student) => (draft[student.id]?.score ?? "") !== "").length;
+  const saved = students.filter((student) => student.mark?.score !== undefined && student.mark?.score !== null).length;
+  const invalid = students.filter((student) => {
+    const score = draft[student.id]?.score ?? "";
+    if (score === "") return false;
+    const numeric = Number(score);
+    return !Number.isFinite(numeric) || numeric < 0 || numeric > maxScore;
+  }).length;
+  return { total, entered, saved, invalid };
+}
+
+function assessmentOpenForMarks(status?: string | null) {
+  return ["DRAFT", "OPEN", "MARKS_ENTRY", "RETURNED_FOR_CORRECTION"].includes((status ?? "DRAFT").toUpperCase());
+}
+
+function assessmentPlacementLabel(config: SchoolConfig | null, assessment: { classId?: string | null; streamId?: string | null }) {
+  if (!assessment.classId) return "Whole school assessment";
+  return classStreamLabel(config ?? { classes: [], school: { id: "", name: "", code: "" }, academicYears: [], subjects: [], gradeBoundaries: [] }, assessment.classId, assessment.streamId);
 }
 
 function workspaceScopeFor(user: Session["user"], config: SchoolConfig): WorkspaceScopeSummary | null {
