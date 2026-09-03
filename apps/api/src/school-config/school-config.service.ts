@@ -1,5 +1,5 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
-import { academicYearSchema, classSchema, gradeBoundarySchema, schoolProfileSchema, streamSchema, subjectSchema, termSchema } from "@aethina/validation";
+import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
+import { academicYearSchema, classSchema, classTeacherAssignmentSchema, gradeBoundarySchema, schoolProfileSchema, streamSchema, subjectSchema, teacherSubjectAssignmentSchema, termSchema } from "@aethina/validation";
 import type { CurrentUser } from "@aethina/shared-types";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { AuditService } from "../audit/audit.service.js";
@@ -54,6 +54,8 @@ export class SchoolConfigService {
 
   async createAcademicYear(actor: CurrentUser, body: unknown) {
     const input = academicYearSchema.parse(body);
+    const duplicate = await this.prisma.academicYear.findFirst({ where: { schoolId: actor.schoolId, name: { equals: input.name, mode: "insensitive" } } });
+    if (duplicate) throw new ConflictException("Academic year already exists.");
     const year = await this.prisma.$transaction(async (tx) => {
       if (input.isActive) {
         await tx.academicYear.updateMany({ where: { schoolId: actor.schoolId }, data: { isActive: false } });
@@ -77,6 +79,8 @@ export class SchoolConfigService {
     if (new Date(input.startsAt) < year.startsAt || new Date(input.endsAt) > year.endsAt) {
       throw new BadRequestException("Term dates must fall inside the academic year.");
     }
+    const duplicate = await this.prisma.term.findFirst({ where: { academicYearId: input.academicYearId, name: { equals: input.name, mode: "insensitive" } } });
+    if (duplicate) throw new ConflictException("Term already exists for this academic year.");
     const term = await this.prisma.$transaction(async (tx) => {
       if (input.isCurrent) {
         await tx.term.updateMany({ where: { academicYear: { schoolId: actor.schoolId } }, data: { isCurrent: false } });
@@ -94,6 +98,8 @@ export class SchoolConfigService {
   async createClass(actor: CurrentUser, body: unknown) {
     const input = classSchema.parse(body);
     await assertClassLevelWithinAcademicScope(this.prisma, actor, input.level);
+    const duplicate = await this.prisma.class.findFirst({ where: { schoolId: actor.schoolId, name: { equals: input.name, mode: "insensitive" } } });
+    if (duplicate) throw new ConflictException("Class already exists.");
     const record = await this.prisma.class.create({ data: { schoolId: actor.schoolId, ...input } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "CLASS_CREATED", entityType: "CLASS", entityId: record.id, newValue: record });
     return record;
@@ -106,6 +112,8 @@ export class SchoolConfigService {
       throw new BadRequestException("Class does not belong to this school.");
     }
     await assertClassWithinAcademicLevelScope(this.prisma, actor, input.classId);
+    const duplicate = await this.prisma.stream.findFirst({ where: { classId: input.classId, name: { equals: input.name, mode: "insensitive" } } });
+    if (duplicate) throw new ConflictException("Stream already exists for this class.");
     const record = await this.prisma.stream.create({ data: { schoolId: actor.schoolId, ...input } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "STREAM_CREATED", entityType: "STREAM", entityId: record.id, newValue: record });
     return record;
@@ -113,14 +121,17 @@ export class SchoolConfigService {
 
   async createSubject(actor: CurrentUser, body: unknown) {
     const input = subjectSchema.parse(body);
+    const duplicate = await this.prisma.subject.findFirst({
+      where: { schoolId: actor.schoolId, OR: [{ code: { equals: input.code, mode: "insensitive" } }, { name: { equals: input.name, mode: "insensitive" } }] }
+    });
+    if (duplicate) throw new ConflictException("Subject code or name already exists.");
     const record = await this.prisma.subject.create({ data: { schoolId: actor.schoolId, ...input } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "SUBJECT_CREATED", entityType: "SUBJECT", entityId: record.id, newValue: record });
     return record;
   }
 
   async createTeacherSubjectAssignment(actor: CurrentUser, body: unknown) {
-    const input = body as { teacherId?: string; subjectId?: string; classId?: string; streamId?: string | null };
-    if (!input.teacherId || !input.subjectId || !input.classId) throw new BadRequestException("Teacher, subject and class are required.");
+    const input = teacherSubjectAssignmentSchema.parse(body);
     await assertClassWithinAcademicLevelScope(this.prisma, actor, input.classId);
     await this.validateAcademicOwnership(actor.schoolId, input.teacherId, input.subjectId, input.classId, input.streamId ?? null);
     const existing = await this.prisma.teacherSubjectAssignment.findFirst({
@@ -134,8 +145,7 @@ export class SchoolConfigService {
   }
 
   async createClassTeacherAssignment(actor: CurrentUser, body: unknown) {
-    const input = body as { teacherId?: string; classId?: string; streamId?: string | null; academicYearId?: string; termId?: string | null };
-    if (!input.teacherId || !input.classId || !input.academicYearId) throw new BadRequestException("Teacher, class and academic year are required.");
+    const input = classTeacherAssignmentSchema.parse(body);
     await assertClassWithinAcademicLevelScope(this.prisma, actor, input.classId);
     await this.validateAcademicOwnership(actor.schoolId, input.teacherId, null, input.classId, input.streamId ?? null);
     const year = await this.prisma.academicYear.findFirst({ where: { id: input.academicYearId, schoolId: actor.schoolId } });
@@ -156,6 +166,12 @@ export class SchoolConfigService {
 
   async createGradeBoundary(actor: CurrentUser, body: unknown) {
     const input = gradeBoundarySchema.parse(body);
+    const existing = await this.prisma.gradeBoundary.findMany({ where: { schoolId: actor.schoolId } });
+    const duplicateOrOverlap = existing.find((boundary) => {
+      if (boundary.grade.trim().toLowerCase() === input.grade.trim().toLowerCase()) return true;
+      return input.minScore <= money(boundary.maxScore) && input.maxScore >= money(boundary.minScore);
+    });
+    if (duplicateOrOverlap) throw new ConflictException("Grade boundary overlaps an existing boundary or duplicates a grade.");
     const record = await this.prisma.gradeBoundary.create({ data: { schoolId: actor.schoolId, ...input } });
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "GRADE_BOUNDARY_CREATED", entityType: "GRADE_BOUNDARY", entityId: record.id, newValue: record });
     return record;
@@ -173,4 +189,9 @@ export class SchoolConfigService {
       if (!stream) throw new BadRequestException("Stream must belong to the selected class.");
     }
   }
+}
+
+function money(value: { toNumber(): number } | number | string | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  return typeof value === "object" && "toNumber" in value ? value.toNumber() : Number(value);
 }

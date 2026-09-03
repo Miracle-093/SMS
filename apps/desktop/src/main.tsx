@@ -79,7 +79,7 @@ type SchoolConfig = {
   gradeBoundaries: Array<{ id: string; grade: string; minScore: string; maxScore: string; remark?: string }>;
   teachers?: Array<{ id: string; userId?: string | null; staffId: string; firstName: string; lastName: string }>;
   teacherSubjectAssignments?: Array<{ id: string; teacherId: string; subjectId: string; classId: string; streamId?: string | null; teacher?: { firstName: string; lastName: string } }>;
-  classTeacherAssignments?: Array<{ id: string; teacherId: string; classId: string; streamId?: string | null; teacher?: { firstName: string; lastName: string }; class?: { name: string }; stream?: { name: string } | null }>;
+  classTeacherAssignments?: Array<{ id: string; teacherId: string; classId: string; streamId?: string | null; academicYearId?: string; teacher?: { firstName: string; lastName: string }; class?: { name: string }; stream?: { name: string } | null }>;
   academicScopeAssignments?: Array<{ id: string; userId: string; band: "LOWER" | "MIDDLE" | "UPPER"; minLevel: number; maxLevel: number; user?: { id: string; displayName: string; email: string } }>;
 };
 
@@ -740,7 +740,7 @@ function App() {
         ) : activeView === "risk" ? (
           <RiskAlertsView api={api} setMessage={showMessage} />
         ) : activeView === "school" ? (
-          <SchoolConfigView config={config} api={api} refreshAll={refreshAll} setMessage={showMessage} />
+          <SchoolConfigView config={config} scope={workspaceScope} api={api} refreshAll={refreshAll} setMessage={showMessage} />
         ) : activeView === "attendance" ? (
           <AttendanceView api={api} setMessage={showMessage} />
         ) : activeView === "sync" ? (
@@ -1094,7 +1094,36 @@ function RosterImportPreview({ api, scope, setMessage }: { api: (path: string, i
   );
 }
 
-function SchoolConfigView({ config, api, refreshAll, setMessage }: { config: SchoolConfig | null; api: (path: string, init?: RequestInit) => Promise<any>; refreshAll: () => Promise<void>; setMessage: (message: string) => void }) {
+function SetupCommandPanel({ config, scope }: { config: SchoolConfig; scope: WorkspaceScopeSummary | null }) {
+  const duplicateSummary = setupDuplicateSummary(config);
+  const bandCounts = [
+    { label: "Lower S1-S2", count: config.classes.filter((klass) => klass.level >= 1 && klass.level <= 2).length },
+    { label: "Middle S3-S4", count: config.classes.filter((klass) => klass.level >= 3 && klass.level <= 4).length },
+    { label: "Upper S5-S6", count: config.classes.filter((klass) => klass.level >= 5 && klass.level <= 6).length }
+  ];
+  return (
+    <section className="setup-command-panel wide-panel">
+      <div>
+        <p className="eyebrow">Academic setup control</p>
+        <h3>{scope?.title ?? "Whole School Setup"}</h3>
+        <p>{scope?.description ?? "Manage the academic structure, class streams, subjects, teacher allocations, class teachers, and grading boundaries."}</p>
+      </div>
+      <div className="setup-command-cards">
+        {bandCounts.map((band) => <span key={band.label}><strong>{band.count}</strong>{band.label}</span>)}
+        <span><strong>{config.subjects.length}</strong>Subjects</span>
+        <span><strong>{config.teacherSubjectAssignments?.length ?? 0}</strong>Subject allocations</span>
+        <span><strong>{config.classTeacherAssignments?.length ?? 0}</strong>Class teachers</span>
+      </div>
+      {duplicateSummary.length > 0 ? (
+        <div className="setup-warning setup-wide-warning">{duplicateSummary.join(" ")}</div>
+      ) : (
+        <div className="setup-ok setup-wide-warning">No obvious duplicate setup records found in the current workspace view.</div>
+      )}
+    </section>
+  );
+}
+
+function SchoolConfigView({ config, scope, api, refreshAll, setMessage }: { config: SchoolConfig | null; scope: WorkspaceScopeSummary | null; api: (path: string, init?: RequestInit) => Promise<any>; refreshAll: () => Promise<void>; setMessage: (message: string) => void }) {
   const [profile, setProfile] = useState({ name: "", code: "", phone: "", email: "", address: "", admissionNumberPrefix: "AET" });
   const [academicYear, setAcademicYear] = useState({ name: "", startsAt: "2026-01-01", endsAt: "2026-12-31", isActive: true });
   const [term, setTerm] = useState({ academicYearId: "", name: "Term 1", startsAt: "2026-01-01", endsAt: "2026-04-30", isCurrent: true });
@@ -1148,8 +1177,36 @@ function SchoolConfigView({ config, api, refreshAll, setMessage }: { config: Sch
     return <div className="empty-state"><h3>Configuration unavailable</h3><p>Start the API to manage school setup records.</p></div>;
   }
 
+  const classDuplicate = config.classes.some((item) => sameText(item.name, classForm.name));
+  const selectedStreamClass = config.classes.find((item) => item.id === stream.classId);
+  const streamDuplicate = Boolean(selectedStreamClass?.streams.some((item) => sameText(item.name, stream.name)));
+  const subjectDuplicate = config.subjects.some((item) => sameText(item.code, subject.code) || sameText(item.name, subject.name));
+  const subjectAssignmentDuplicate = (config.teacherSubjectAssignments ?? []).some((item) =>
+    item.teacherId === subjectAssignment.teacherId &&
+    item.subjectId === subjectAssignment.subjectId &&
+    item.classId === subjectAssignment.classId &&
+    (item.streamId ?? "") === (subjectAssignment.streamId || "")
+  );
+  const classTeacherDuplicate = (config.classTeacherAssignments ?? []).some((item) =>
+    item.teacherId === classTeacherAssignment.teacherId &&
+    item.classId === classTeacherAssignment.classId &&
+    (item.streamId ?? "") === (classTeacherAssignment.streamId || "") &&
+    item.academicYearId === classTeacherAssignment.academicYearId
+  );
+  const gradeBoundaryConflict = gradeBoundaryOverlaps(config.gradeBoundaries, Number(boundary.minScore), Number(boundary.maxScore), boundary.grade);
+
+  function guardedSubmit(event: React.FormEvent, blocked: boolean, warning: string, path: string, body: Record<string, unknown>, success: string) {
+    event.preventDefault();
+    if (blocked) {
+      setMessage(warning);
+      return;
+    }
+    void submit(path, body, success);
+  }
+
   return (
     <section className="setup-grid">
+      <SetupCommandPanel config={config} scope={scope} />
       <form className="setup-panel wide-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/profile", profile, "School profile updated."); }}>
         <div className="section-heading"><h3>School Profile</h3><button type="submit">Save</button></div>
         <div className="setup-form profile-form">
@@ -1185,46 +1242,50 @@ function SchoolConfigView({ config, api, refreshAll, setMessage }: { config: Sch
         <ConfigList items={config.academicYears.flatMap((year) => year.terms.map((item) => `${year.name}: ${item.name}${item.isCurrent ? " current" : ""}`))} />
       </form>
 
-      <form className="setup-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/classes", { name: classForm.name, level: Number(classForm.level) }, "Class created."); }}>
-        <div className="section-heading"><h3>Classes</h3><button type="submit">Add</button></div>
+      <form className="setup-panel" onSubmit={(event) => guardedSubmit(event, classDuplicate, "That class already exists in this school setup.", "/school-config/classes", { name: classForm.name, level: Number(classForm.level) }, "Class created.")}>
+        <div className="section-heading"><h3>Classes</h3><button type="submit" disabled={classDuplicate}>Add</button></div>
         <div className="setup-form two-col">
           <label>Name<input required value={classForm.name} onChange={(event) => setClassForm({ ...classForm, name: event.target.value })} /></label>
           <label>Level<input required type="number" min="1" value={classForm.level} onChange={(event) => setClassForm({ ...classForm, level: event.target.value })} /></label>
         </div>
+        {classDuplicate && <p className="setup-warning">This class name already exists. Use the existing class or choose a different name.</p>}
         <ConfigList items={config.classes.map((item) => `${item.name} (${item.streams.length} streams)`)} />
       </form>
 
-      <form className="setup-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/streams", stream, "Stream created."); }}>
-        <div className="section-heading"><h3>Streams</h3><button type="submit">Add</button></div>
+      <form className="setup-panel" onSubmit={(event) => guardedSubmit(event, streamDuplicate, "That stream already exists for the selected class.", "/school-config/streams", stream, "Stream created.")}>
+        <div className="section-heading"><h3>Streams</h3><button type="submit" disabled={streamDuplicate}>Add</button></div>
         <div className="setup-form two-col">
           <label>Class<select value={stream.classId} onChange={(event) => setStream({ ...stream, classId: event.target.value })}>{config.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label>Name<input required value={stream.name} onChange={(event) => setStream({ ...stream, name: event.target.value })} /></label>
         </div>
+        {streamDuplicate && <p className="setup-warning">This stream already exists for {selectedStreamClass?.name ?? "the selected class"}.</p>}
         <ConfigList items={config.classes.flatMap((item) => item.streams.map((streamItem) => `${item.name}: ${streamItem.name}`))} />
       </form>
 
-      <form className="setup-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/subjects", subject, "Subject created."); }}>
-        <div className="section-heading"><h3>Subjects</h3><button type="submit">Add</button></div>
+      <form className="setup-panel" onSubmit={(event) => guardedSubmit(event, subjectDuplicate, "That subject code or name already exists.", "/school-config/subjects", subject, "Subject created.")}>
+        <div className="section-heading"><h3>Subjects</h3><button type="submit" disabled={subjectDuplicate}>Add</button></div>
         <div className="setup-form two-col">
           <label>Code<input required value={subject.code} onChange={(event) => setSubject({ ...subject, code: event.target.value.toUpperCase() })} /></label>
           <label>Name<input required value={subject.name} onChange={(event) => setSubject({ ...subject, name: event.target.value })} /></label>
         </div>
+        {subjectDuplicate && <p className="setup-warning">Subject codes and names should be unique for clear timetable and marks workflows.</p>}
         <ConfigList items={config.subjects.map((item) => `${item.code} - ${item.name}`)} />
       </form>
 
-      <form className="setup-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/teacher-subject-assignments", { ...subjectAssignment, streamId: subjectAssignment.streamId || null }, "Teacher subject allocation saved."); }}>
-        <div className="section-heading"><h3>Subject Allocation</h3><button type="submit">Assign</button></div>
+      <form className="setup-panel" onSubmit={(event) => guardedSubmit(event, subjectAssignmentDuplicate, "This teacher already has that subject allocation.", "/school-config/teacher-subject-assignments", { ...subjectAssignment, streamId: subjectAssignment.streamId || null }, "Teacher subject allocation saved.")}>
+        <div className="section-heading"><h3>Subject Allocation</h3><button type="submit" disabled={subjectAssignmentDuplicate}>Assign</button></div>
         <div className="setup-form">
           <label>Teacher<select value={subjectAssignment.teacherId} onChange={(event) => setSubjectAssignment({ ...subjectAssignment, teacherId: event.target.value })}>{config.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.firstName} {teacher.lastName}</option>)}</select></label>
           <label>Subject<select value={subjectAssignment.subjectId} onChange={(event) => setSubjectAssignment({ ...subjectAssignment, subjectId: event.target.value })}>{config.subjects.map((item) => <option key={item.id} value={item.id}>{item.code} - {item.name}</option>)}</select></label>
           <label>Class<select value={subjectAssignment.classId} onChange={(event) => setSubjectAssignment({ ...subjectAssignment, classId: event.target.value, streamId: config.classes.find((item) => item.id === event.target.value)?.streams[0]?.id || "" })}>{config.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label>Stream<select value={subjectAssignment.streamId} onChange={(event) => setSubjectAssignment({ ...subjectAssignment, streamId: event.target.value })}><option value="">Whole class</option>{config.classes.find((item) => item.id === subjectAssignment.classId)?.streams.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         </div>
+        {subjectAssignmentDuplicate && <p className="setup-warning">This allocation already exists. Reassign only when the class, stream, subject, or teacher changes.</p>}
         <ConfigList items={(config.teacherSubjectAssignments ?? []).map((item) => `${item.teacher?.firstName ?? "Teacher"} ${item.teacher?.lastName ?? ""}: ${config.subjects.find((subject) => subject.id === item.subjectId)?.name ?? item.subjectId}`)} />
       </form>
 
-      <form className="setup-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/class-teacher-assignments", { ...classTeacherAssignment, streamId: classTeacherAssignment.streamId || null, termId: classTeacherAssignment.termId || null }, "Class teacher allocation saved."); }}>
-        <div className="section-heading"><h3>Class Teachers</h3><button type="submit">Assign</button></div>
+      <form className="setup-panel" onSubmit={(event) => guardedSubmit(event, classTeacherDuplicate, "This class-teacher allocation already exists for the current academic year.", "/school-config/class-teacher-assignments", { ...classTeacherAssignment, streamId: classTeacherAssignment.streamId || null, termId: classTeacherAssignment.termId || null }, "Class teacher allocation saved.")}>
+        <div className="section-heading"><h3>Class Teachers</h3><button type="submit" disabled={classTeacherDuplicate}>Assign</button></div>
         <div className="setup-form">
           <label>Teacher<select value={classTeacherAssignment.teacherId} onChange={(event) => setClassTeacherAssignment({ ...classTeacherAssignment, teacherId: event.target.value })}>{config.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.firstName} {teacher.lastName}</option>)}</select></label>
           <label>Class<select value={classTeacherAssignment.classId} onChange={(event) => setClassTeacherAssignment({ ...classTeacherAssignment, classId: event.target.value, streamId: config.classes.find((item) => item.id === event.target.value)?.streams[0]?.id || "" })}>{config.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -1232,17 +1293,19 @@ function SchoolConfigView({ config, api, refreshAll, setMessage }: { config: Sch
           <label>Academic year<select value={classTeacherAssignment.academicYearId} onChange={(event) => setClassTeacherAssignment({ ...classTeacherAssignment, academicYearId: event.target.value })}>{config.academicYears.map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}</select></label>
           <label>Term<select value={classTeacherAssignment.termId} onChange={(event) => setClassTeacherAssignment({ ...classTeacherAssignment, termId: event.target.value })}><option value="">All terms</option>{config.academicYears.flatMap((year) => year.terms).map((termItem) => <option key={termItem.id} value={termItem.id}>{termItem.name}</option>)}</select></label>
         </div>
+        {classTeacherDuplicate && <p className="setup-warning">This class teacher is already assigned for that class or stream in the selected academic year.</p>}
         <ConfigList items={(config.classTeacherAssignments ?? []).map((item) => `${item.teacher?.firstName ?? "Teacher"} ${item.teacher?.lastName ?? ""}: ${item.class?.name ?? item.classId}${item.stream ? ` ${item.stream.name}` : ""}`)} />
       </form>
 
-      <form className="setup-panel" onSubmit={(event) => { event.preventDefault(); void submit("/school-config/grade-boundaries", { ...boundary, minScore: Number(boundary.minScore), maxScore: Number(boundary.maxScore) }, "Grade boundary created."); }}>
-        <div className="section-heading"><h3>Grade Boundaries</h3><button type="submit">Add</button></div>
+      <form className="setup-panel" onSubmit={(event) => guardedSubmit(event, gradeBoundaryConflict, "That grade boundary overlaps an existing boundary.", "/school-config/grade-boundaries", { ...boundary, minScore: Number(boundary.minScore), maxScore: Number(boundary.maxScore) }, "Grade boundary created.")}>
+        <div className="section-heading"><h3>Grade Boundaries</h3><button type="submit" disabled={gradeBoundaryConflict}>Add</button></div>
         <div className="setup-form two-col">
           <label>Grade<input required value={boundary.grade} onChange={(event) => setBoundary({ ...boundary, grade: event.target.value.toUpperCase() })} /></label>
           <label>Min<input type="number" value={boundary.minScore} onChange={(event) => setBoundary({ ...boundary, minScore: event.target.value })} /></label>
           <label>Max<input type="number" value={boundary.maxScore} onChange={(event) => setBoundary({ ...boundary, maxScore: event.target.value })} /></label>
           <label>Remark<input value={boundary.remark} onChange={(event) => setBoundary({ ...boundary, remark: event.target.value })} /></label>
         </div>
+        {gradeBoundaryConflict && <p className="setup-warning">Grade score ranges should not overlap existing boundaries.</p>}
         <ConfigList items={config.gradeBoundaries.map((item) => `${item.grade}: ${item.minScore}-${item.maxScore}`)} />
       </form>
     </section>
@@ -1425,6 +1488,47 @@ function ConfigList({ items }: { items: string[] }) {
       {items.length === 0 && <li>No setup records have been added.</li>}
     </ul>
   );
+}
+
+function sameText(left: string | null | undefined, right: string | null | undefined) {
+  return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase());
+}
+
+function gradeBoundaryOverlaps(boundaries: SchoolConfig["gradeBoundaries"], minScore: number, maxScore: number, grade: string) {
+  if (!Number.isFinite(minScore) || !Number.isFinite(maxScore) || minScore > maxScore) return true;
+  return boundaries.some((item) => {
+    if (sameText(item.grade, grade)) return true;
+    const existingMin = Number(item.minScore);
+    const existingMax = Number(item.maxScore);
+    return minScore <= existingMax && maxScore >= existingMin;
+  });
+}
+
+function setupDuplicateSummary(config: SchoolConfig) {
+  const messages: string[] = [];
+  const classNames = duplicateValues(config.classes.map((item) => item.name));
+  const subjectCodes = duplicateValues(config.subjects.map((item) => item.code));
+  const subjectNames = duplicateValues(config.subjects.map((item) => item.name));
+  const streamDuplicates = config.classes
+    .map((klass) => ({ klass, duplicates: duplicateValues(klass.streams.map((stream) => stream.name)) }))
+    .filter((item) => item.duplicates.length > 0);
+  if (classNames.length) messages.push(`Duplicate classes: ${classNames.join(", ")}.`);
+  if (streamDuplicates.length) messages.push(`Duplicate streams: ${streamDuplicates.map((item) => `${item.klass.name} (${item.duplicates.join(", ")})`).join("; ")}.`);
+  if (subjectCodes.length) messages.push(`Duplicate subject codes: ${subjectCodes.join(", ")}.`);
+  if (subjectNames.length) messages.push(`Duplicate subject names: ${subjectNames.join(", ")}.`);
+  return messages;
+}
+
+function duplicateValues(values: string[]) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) continue;
+    if (seen.has(normalized)) duplicates.add(value);
+    seen.add(normalized);
+  }
+  return [...duplicates];
 }
 
 function toRegistration(form: RegistrationForm, schoolId: string) {

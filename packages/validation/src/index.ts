@@ -133,6 +133,21 @@ export const subjectSchema = z.object({
   teacherId: z.string().uuid().nullable().optional()
 });
 
+export const teacherSubjectAssignmentSchema = z.object({
+  teacherId: z.string().uuid(),
+  subjectId: z.string().uuid(),
+  classId: z.string().uuid(),
+  streamId: z.string().uuid().nullable().optional()
+});
+
+export const classTeacherAssignmentSchema = z.object({
+  teacherId: z.string().uuid(),
+  classId: z.string().uuid(),
+  streamId: z.string().uuid().nullable().optional(),
+  academicYearId: z.string().uuid(),
+  termId: z.string().uuid().nullable().optional()
+});
+
 export const gradeBoundarySchema = z.object({
   grade: z.string().min(1).max(4),
   minScore: z.number().min(0).max(100),

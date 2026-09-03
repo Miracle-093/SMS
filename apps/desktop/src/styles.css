@@ -990,6 +990,53 @@ dd {
   gap: 16px;
 }
 
+.setup-command-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, .8fr) minmax(320px, 1.2fr);
+  gap: 14px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid #d8e0e7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.setup-command-panel h3 {
+  margin: 2px 0 6px;
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.setup-command-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.setup-command-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.setup-command-cards span {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #e1e8ee;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.setup-command-cards strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+
 .workflow-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(280px, 1fr));
@@ -1144,6 +1191,32 @@ dd {
 .config-list li {
   border-top: 1px solid #edf1f4;
   padding-top: 8px;
+}
+
+.setup-warning,
+.setup-ok {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.setup-warning {
+  border: 1px solid #f7d08a;
+  background: #fff8e4;
+  color: #855900;
+}
+
+.setup-ok {
+  border: 1px solid #bedbcc;
+  background: #edf7f3;
+  color: var(--forest);
+}
+
+.setup-wide-warning {
+  grid-column: 1 / -1;
 }
 
 .kiosk {
@@ -1705,6 +1778,8 @@ small {
   .workflow-grid,
   .marks-entry-toolbar,
   .setup-grid,
+  .setup-command-panel,
+  .setup-command-cards,
   .setup-form,
   .setup-form.two-col,
   .roster-preview-form,
