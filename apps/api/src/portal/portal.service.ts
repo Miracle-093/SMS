@@ -15,20 +15,20 @@ export class PortalService {
 
   async home(user: CurrentUser) {
     const student = await this.student(user);
-    const [finance, latestReport, announcements, notifications, timetable] = await Promise.all([
+    const [finance, latestReport, announcements, notifications] = await Promise.all([
       this.finance(user),
       this.prisma.reportCard.findFirst({ where: { schoolId: user.schoolId, studentId: user.id, status: "PUBLISHED", deletedAt: null }, orderBy: { generatedAt: "desc" } }),
       this.announcements(user),
-      this.notifications(user),
-      this.timetable(user)
+      this.notifications(user)
     ]);
+    const timetable = student.currentClassId ? await this.timetable(user) : [];
     return { student, finance: finance.summary, latestReport, announcements: announcements.slice(0, 5), notifications: notifications.slice(0, 5), timetable: timetable.slice(0, 8) };
   }
 
   async finance(user: CurrentUser) {
     const invoices = await this.prisma.studentInvoice.findMany({
       where: { schoolId: user.schoolId, studentId: user.id, deletedAt: null },
-      include: { lines: true, payments: { include: { receipt: true } }, adjustments: true, term: true },
+      include: { lines: true, payments: { include: { receipt: true, reversals: true } }, adjustments: true, term: true },
       orderBy: { invoiceDate: "desc" }
     });
     return {
@@ -55,10 +55,17 @@ export class PortalService {
     const student = await this.student(user);
     if (!student.currentClassId) throw new BadRequestException("Portal student is not assigned to a class.");
     const school = await this.prisma.school.findUnique({ where: { id: user.schoolId } });
-    return this.prisma.timetableEntry.findMany({
+    const rows = await this.prisma.timetableEntry.findMany({
       where: { schoolId: user.schoolId, deletedAt: null, termId: school?.currentTermId ?? undefined, classId: student.currentClassId, streamId: student.currentStreamId ?? undefined },
       orderBy: [{ dayOfWeek: "asc" }, { periodNumber: "asc" }]
     });
+    const [subjects, teachers] = await Promise.all([
+      this.prisma.subject.findMany({ where: { schoolId: user.schoolId, id: { in: [...new Set(rows.map((row) => row.subjectId))] } } }),
+      this.prisma.teacher.findMany({ where: { schoolId: user.schoolId, id: { in: [...new Set(rows.map((row) => row.teacherId))] } } })
+    ]);
+    const subjectById = new Map(subjects.map((subject) => [subject.id, subject]));
+    const teacherById = new Map(teachers.map((teacher) => [teacher.id, teacher]));
+    return rows.map((row) => ({ ...row, subject: subjectById.get(row.subjectId) ?? null, teacher: teacherById.get(row.teacherId) ?? null }));
   }
 
   async announcements(user: CurrentUser) {

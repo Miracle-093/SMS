@@ -15,7 +15,7 @@ type PortalHome = {
   latestReport?: { grade: string; averageScore: string | number; status: string } | null;
   announcements: Array<{ id: string; title: string; message: string; priority: string; publishAt: string }>;
   notifications: Array<{ id: string; title: string; body: string; readAt?: string | null; createdAt: string }>;
-  timetable: Array<{ id: string; dayOfWeek: number; periodNumber: number; startsAt: string; endsAt: string; subjectId: string; room?: string | null }>;
+  timetable: Array<{ id: string; dayOfWeek: number; periodNumber: number; startsAt: string; endsAt: string; subjectId: string; subject?: { name: string; code: string } | null; teacher?: { firstName: string; lastName: string } | null; room?: string | null }>;
 };
 
 const primaryViews = ["home", "academics", "finance", "timetable", "more"] as const;
@@ -42,6 +42,7 @@ function PortalApp() {
   const [error, setError] = useState<PortalIssue | null>(null);
   const [viewErrors, setViewErrors] = useState<Partial<Record<LoadableView, PortalIssue | null>>>({});
   const [loading, setLoading] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -102,6 +103,30 @@ function PortalApp() {
     setSession(null);
     setHome(null);
     setViewErrors({});
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  }
+
+  async function changePassword(event: React.FormEvent) {
+    event.preventDefault();
+    if (!session) return;
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setError({ message: "The new password and confirmation do not match." });
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await api("/portal/change-password", session.accessToken, { method: "POST", body: { currentPassword: passwordForm.currentPassword, newPassword: passwordForm.newPassword } });
+      const nextSession = { ...session, user: { ...session.user, mustChangePassword: false } };
+      localStorage.setItem("aethina.portal.session", JSON.stringify(nextSession));
+      setSession(nextSession);
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      void refresh(nextSession.accessToken, "home");
+    } catch (err) {
+      setError(readableError(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function markNotificationRead(id: string) {
@@ -140,6 +165,28 @@ function PortalApp() {
   const studentIdentity = home?.student;
   const studentDisplayName = studentIdentity ? `${studentIdentity.firstName} ${studentIdentity.lastName}` : session.user.displayName;
   const workspaceIdentity = "Student Portal";
+
+  if (session.user.mustChangePassword) {
+    return (
+      <main className="login-shell">
+        <form className="login-panel reset-panel" onSubmit={changePassword}>
+          <p className="eyebrow">Secure first sign-in</p>
+          <h1>Set Your Password</h1>
+          <p className="slogan">Choose a private password before opening the student portal.</p>
+          <label>Current password<input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} autoComplete="current-password" required /></label>
+          <label>New password<input type="password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} autoComplete="new-password" required /></label>
+          <label>Confirm new password<input type="password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} autoComplete="new-password" required /></label>
+          <p className="password-rule">Use at least 10 characters with uppercase, lowercase, and a number.</p>
+          <AlertMessage issue={error} title="Password update issue" />
+          <div className="reset-actions">
+            <button type="submit" disabled={loading} aria-busy={loading}>{loading ? "Updating..." : "Update password"}</button>
+            <button type="button" className="ghost" onClick={logout}>Sign out</button>
+          </div>
+        </form>
+      </main>
+    );
+  }
+
   const activeLoadableView = loadableViews.includes(active as LoadableView) ? active as LoadableView : null;
   const activeError = activeLoadableView ? viewErrors[activeLoadableView] : null;
   const activeHasData =
@@ -218,6 +265,11 @@ function HomeView({ home }: { home: PortalHome | null }) {
           <p className="eyebrow">{home.student.admissionNo}</p>
           <h2>{home.student.firstName} {home.student.lastName}</h2>
           <p>{[home.student.currentClass?.name, home.student.currentStream?.name].filter(Boolean).join(" ") || "Class details not assigned"}</p>
+          <div className="student-chips">
+            <span>{home.student.currentClass?.name ?? "Class pending"}</span>
+            <span>{home.student.currentStream?.name ?? "Stream pending"}</span>
+            <span>Student Portal</span>
+          </div>
         </div>
         <div className={home.finance.balance > 0 ? "hero-panel owing" : "hero-panel settled"}>
           <span>Fee balance</span>
@@ -227,7 +279,7 @@ function HomeView({ home }: { home: PortalHome | null }) {
       </header>
       <section className="stats">
         <Metric label="Fee balance" value={ugx(home.finance.balance)} danger={home.finance.balance > 0} />
-        <Metric label="Paid this term" value={ugx(home.finance.paid)} />
+        <Metric label="Amount paid" value={ugx(home.finance.paid)} />
         <Metric label="Latest result" value={home.latestReport ? `${home.latestReport.grade} - ${home.latestReport.averageScore}` : "Pending"} />
       </section>
       <section className="dashboard-grid">
@@ -241,8 +293,8 @@ function HomeView({ home }: { home: PortalHome | null }) {
         </article>
         <article className="panel">
           <p className="eyebrow">Upcoming timetable</p>
-          <h3>{firstTimetable ? `Day ${firstTimetable.dayOfWeek}, Period ${firstTimetable.periodNumber}` : "No timetable published"}</h3>
-          <p>{firstTimetable ? `${timeRange(firstTimetable)}${firstTimetable.room ? ` in ${firstTimetable.room}` : ""}` : "The school has not published timetable entries for this class yet."}</p>
+          <h3>{firstTimetable ? `${subjectName(firstTimetable)}, Period ${firstTimetable.periodNumber}` : "No timetable published"}</h3>
+          <p>{firstTimetable ? `${dayLabel(firstTimetable.dayOfWeek)} at ${timeRange(firstTimetable)}${firstTimetable.room ? ` in ${firstTimetable.room}` : ""}` : "The school has not published timetable entries for this class yet."}</p>
         </article>
       </section>
       <section className="split">
@@ -310,6 +362,7 @@ function FinanceView({ data, student }: { data: any; student?: StudentIdentity }
   const summary = data.summary ?? { expected: 0, paid: 0, balance: 0 };
   const invoices = data.invoices ?? [];
   const payments = invoices.flatMap((invoice: any) => (invoice.payments ?? []).map((payment: any) => ({ ...payment, invoiceNo: invoice.invoiceNo })));
+  const latestInvoice = invoices[0];
   return (
     <>
       <SectionTitle eyebrow="Term billing" title="Finance" helper="Track issued invoices, payments received, and outstanding balances." action={<button type="button" className="ghost no-print" onClick={printPage}>Print</button>} />
@@ -326,6 +379,11 @@ function FinanceView({ data, student }: { data: any; student?: StudentIdentity }
           <p>{summary.balance > 0 ? `${ugx(summary.balance)} remains after ${ugx(summary.paid)} in payments.` : `${ugx(summary.paid)} has been recorded against issued invoices.`}</p>
         </article>
         <article className="panel">
+          <p className="eyebrow">Latest invoice</p>
+          <h3>{latestInvoice ? latestInvoice.invoiceNo : "No invoice issued"}</h3>
+          <p>{latestInvoice ? `${titleCase(String(latestInvoice.status ?? "issued"))}: ${ugx(latestInvoice.balance)} balance due by ${dateLabel(latestInvoice.dueDate)}.` : "Invoices will appear here after the bursar posts term fees."}</p>
+        </article>
+        <article className="panel">
           <p className="eyebrow">Payment history</p>
           <h3>{payments.length ? `${payments.length} recorded payment${payments.length === 1 ? "" : "s"}` : "No payments recorded"}</h3>
           <p>{payments[0] ? `Latest receipt ${payments[0].receiptNo ?? payments[0].receipt?.receiptNo ?? "N/A"} for ${ugx(payments[0].amount)}.` : "Payments will appear here after the bursar posts them."}</p>
@@ -336,7 +394,8 @@ function FinanceView({ data, student }: { data: any; student?: StudentIdentity }
         columns={[
           { heading: "Invoice", render: (invoice: any) => invoice.invoiceNo },
           { heading: "Issued", render: (invoice: any) => dateLabel(invoice.invoiceDate) },
-          { heading: "Status", render: (invoice: any) => title(String(invoice.status ?? "pending").toLowerCase()) },
+          { heading: "Due", render: (invoice: any) => dateLabel(invoice.dueDate) },
+          { heading: "Status", render: (invoice: any) => <span className={portalStatusClass(invoice.status)}>{title(String(invoice.status ?? "pending").toLowerCase())}</span> },
           { heading: "Expected", align: "right", render: (invoice: any) => ugx(invoice.amount) },
           { heading: "Paid", align: "right", render: (invoice: any) => ugx(invoice.amountPaid) },
           { heading: "Balance", align: "right", render: (invoice: any) => ugx(invoice.balance) }
@@ -351,6 +410,7 @@ function FinanceView({ data, student }: { data: any; student?: StudentIdentity }
           { heading: "Invoice", render: (payment: any) => payment.invoiceNo ?? "N/A" },
           { heading: "Date", render: (payment: any) => dateLabel(payment.paidAt) },
           { heading: "Method", render: (payment: any) => titleCase(String(payment.method ?? "payment")) },
+          { heading: "Status", render: (payment: any) => paymentStatusLabel(payment.reversals) },
           { heading: "Amount", align: "right", render: (payment: any) => ugx(payment.amount) }
         ]}
         empty="No payments have been recorded yet."
@@ -374,7 +434,9 @@ function TimetableView({ rows }: { rows: any[] }) {
                 {(dayRows as any[]).map((row) => (
                   <li key={row.id}>
                     <span>Period {row.periodNumber}</span>
-                    <strong>{timeRange(row)}</strong>
+                    <strong>{subjectName(row)}</strong>
+                    <small>{timeRange(row)}</small>
+                    {row.teacher && <small>{row.teacher.firstName} {row.teacher.lastName}</small>}
                     {row.room && <small>{row.room}</small>}
                   </li>
                 ))}
@@ -535,6 +597,32 @@ function isoDateTime(value?: string | Date | null) {
 function dayLabel(value: number | string) {
   const day = Number(value);
   return Number.isFinite(day) ? `Day ${day}` : "School day";
+}
+
+function subjectName(row: { subject?: { name?: string | null; code?: string | null } | null; subjectId?: string }) {
+  return row.subject?.name ?? row.subject?.code ?? "Subject pending";
+}
+
+function paymentStatusLabel(reversals?: Array<{ approvalStatus: string }>) {
+  const status = paymentReversalStatus(reversals);
+  return <span className={portalStatusClass(status)}>{status === "Valid" ? "Received" : `${status} reversal`}</span>;
+}
+
+function paymentReversalStatus(reversals?: Array<{ approvalStatus: string }>) {
+  if (!reversals?.length) return "Valid";
+  if (reversals.some((item) => item.approvalStatus === "APPROVED")) return "Approved";
+  if (reversals.some((item) => item.approvalStatus === "PENDING")) return "Pending";
+  if (reversals.some((item) => item.approvalStatus === "REJECTED")) return "Rejected";
+  return titleCase(reversals[0]?.approvalStatus ?? "review");
+}
+
+function portalStatusClass(value: string | null | undefined) {
+  const status = (value ?? "").toUpperCase();
+  if (["PAID", "APPROVED"].includes(status)) return "status-pill settled-status";
+  if (["VALID", "ACTIVE"].includes(status)) return "status-pill good-status";
+  if (["PARTIALLY PAID", "PARTIALLY_PAID", "PENDING", "ISSUED"].includes(status)) return "status-pill watch-status";
+  if (["OVERDUE", "CANCELLED", "REJECTED"].includes(status)) return "status-pill danger-status";
+  return "status-pill";
 }
 
 function timeRange(row: { startsAt?: string; endsAt?: string }) {
