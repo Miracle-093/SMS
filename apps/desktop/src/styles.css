@@ -1780,6 +1780,100 @@ td.row-actions {
   grid-template-columns: 170px 1fr;
 }
 
+.timetable-command,
+.timetable-filters {
+  display: grid;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf1f4;
+  background: #fbfcfd;
+}
+
+.timetable-command {
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: center;
+}
+
+.timetable-command h3 {
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+
+.timetable-command p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.timetable-mode-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.timetable-filters {
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  align-items: end;
+}
+
+.timetable-filters label {
+  display: grid;
+  gap: 6px;
+  color: #354250;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.weekly-timetable {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.timetable-day-card {
+  min-height: 150px;
+  padding: 12px;
+  border: 1px solid #e1e8ee;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.timetable-day-card h4 {
+  margin: 0 0 10px;
+  color: var(--ink);
+}
+
+.timetable-day-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lesson-card {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #edf1f4;
+  border-left: 3px solid var(--aethina-gold);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.lesson-card + .lesson-card {
+  margin-top: 8px;
+}
+
+.lesson-card span,
+.lesson-card small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.lesson-card strong {
+  color: var(--ink);
+}
+
 small {
   color: #6a7b8b;
 }
@@ -1882,6 +1976,8 @@ small {
   .setup-command-cards,
   .finance-command-panel,
   .finance-filter-bar,
+  .timetable-command,
+  .timetable-filters,
   .setup-form,
   .setup-form.two-col,
   .roster-preview-form,

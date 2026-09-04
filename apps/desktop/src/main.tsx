@@ -722,7 +722,7 @@ function App() {
         ) : activeView === "academics" ? (
           <AcademicsAdminView api={api} config={config} session={session} scope={workspaceScope} setMessage={showMessage} />
         ) : activeView === "timetable" ? (
-          <TimetableAdminView api={api} config={config} scope={workspaceScope} setMessage={showMessage} />
+          <TimetableAdminView api={api} config={config} scope={workspaceScope} session={session} setMessage={showMessage} />
         ) : activeView === "finance" ? (
           <FinanceView api={api} config={config} students={visibleStudents} session={session} online={online} refreshOfflineState={refreshOfflineState} setMessage={showMessage} />
         ) : activeView === "budgets" ? (
@@ -2882,9 +2882,11 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
   </section>;
 }
 
-function TimetableAdminView({ api, config, scope, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; scope: WorkspaceScopeSummary | null; setMessage: (message: string) => void }) {
+function TimetableAdminView({ api, config, scope, session, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; config: SchoolConfig | null; scope: WorkspaceScopeSummary | null; session: Session; setMessage: (message: string) => void }) {
   const [rows, setRows] = useState<any[]>([]);
   const [form, setForm] = useState({ classId: "", streamId: "", subjectId: "", teacherId: "", room: "", dayOfWeek: "1", periodNumber: "1", startsAt: "08:00", endsAt: "08:40" });
+  const [filters, setFilters] = useState({ classId: "", teacherId: "", dayOfWeek: "" });
+  const [mode, setMode] = useState<"grid" | "list">("grid");
   async function load() { setRows(asArray<any>(await api("/timetable"))); }
   useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Timetable unavailable."))); }, []);
   useEffect(() => {
@@ -2899,6 +2901,10 @@ function TimetableAdminView({ api, config, scope, setMessage }: { api: (path: st
   }, [config]);
   async function createEntry(event: React.FormEvent) {
     event.preventDefault();
+    if (clientTimetableConflict) {
+      setMessage(clientTimetableConflict);
+      return;
+    }
     await api("/timetable", {
       method: "POST",
       body: JSON.stringify({
@@ -2921,26 +2927,61 @@ function TimetableAdminView({ api, config, scope, setMessage }: { api: (path: st
   const subjects = new Map((config?.subjects ?? []).map((subject) => [subject.id, subject.name]));
   const teachers = new Map((config?.teachers ?? []).map((teacher) => [teacher.id, `${teacher.staffId} - ${teacher.firstName} ${teacher.lastName}`]));
   const classes = new Map((config?.classes ?? []).map((klass) => [klass.id, klass.name]));
+  const streams = new Map((config?.classes ?? []).flatMap((klass) => klass.streams.map((stream) => [stream.id, stream.name])));
   const currentClass = config?.classes.find((klass) => klass.id === form.classId);
+  const filteredRows = rows.filter((row) =>
+    (!filters.classId || row.classId === filters.classId) &&
+    (!filters.teacherId || row.teacherId === filters.teacherId) &&
+    (!filters.dayOfWeek || String(row.dayOfWeek) === filters.dayOfWeek)
+  );
+  const clientTimetableConflict = timetableConflictMessage(rows, form);
+  const canManageTimetable = session.user.permissions.includes(PermissionKey.TimetableManage);
+  const days = [1, 2, 3, 4, 5, 6, 7];
   return <section className="operation-panel wide-panel">
     <div className="section-heading"><h3>Timetable</h3><div className="row-actions"><button type="button" className="ghost no-print" onClick={printPage}>Print</button><button type="button" onClick={() => void load()}>Refresh</button></div></div>
     {scope && <WorkspaceScopePanel summary={scope} />}
-    <form className="workflow-form" onSubmit={(event) => void createEntry(event)}>
-      <select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value, streamId: config?.classes.find((klass) => klass.id === event.target.value)?.streams[0]?.id ?? "" })}><option value="">Class</option>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select>
-      <select value={form.streamId} onChange={(event) => setForm({ ...form, streamId: event.target.value })}><option value="">All streams</option>{currentClass?.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select>
-      <select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><option value="">Subject</option>{config?.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select>
-      <select value={form.teacherId} onChange={(event) => setForm({ ...form, teacherId: event.target.value })}><option value="">Teacher</option>{config?.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.staffId} - {teacher.firstName} {teacher.lastName}</option>)}</select>
-      <select value={form.dayOfWeek} onChange={(event) => setForm({ ...form, dayOfWeek: event.target.value })}>{["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, index) => <option key={day} value={String(index + 1)}>{day}</option>)}</select>
-      <input type="number" min="1" placeholder="Period" value={form.periodNumber} onChange={(event) => setForm({ ...form, periodNumber: event.target.value })} />
-      <input type="time" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} />
-      <input type="time" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} />
-      <input placeholder="Room" value={form.room} onChange={(event) => setForm({ ...form, room: event.target.value })} />
-      <button type="submit">Add Lesson</button>
-    </form>
-    <DataTable label="Timetable entries"><thead><tr><th scope="col">Day</th><th scope="col">Period</th><th scope="col">Class</th><th scope="col">Subject</th><th scope="col">Teacher</th><th scope="col">Time</th><th scope="col">Room</th></tr></thead><tbody>
-      {rows.map((row) => <tr key={row.id}><td>{weekdayLabel(row.dayOfWeek)}</td><td>{row.periodNumber}</td><td>{classes.get(row.classId) ?? "Class not found"}</td><td>{subjects.get(row.subjectId) ?? "Subject not found"}</td><td>{teachers.get(row.teacherId) ?? "Teacher not found"}</td><td>{row.startsAt}-{row.endsAt}</td><td>{row.room ?? "Not assigned"}</td></tr>)}
-      {rows.length === 0 && <tr><td colSpan={7} className="empty">No timetable entries yet.</td></tr>}
-    </tbody></DataTable>
+    <div className="timetable-command">
+      <div>
+        <p className="eyebrow">Weekly planning</p>
+        <h3>Class and Teacher Timetable</h3>
+        <p>Create lessons for the current term, then scan by day, class, teacher, or room before publishing the demo schedule.</p>
+      </div>
+      <div className="timetable-mode-toggle" role="group" aria-label="Timetable view mode">
+        <button type="button" className={mode === "grid" ? "active" : "ghost"} onClick={() => setMode("grid")}>Grid</button>
+        <button type="button" className={mode === "list" ? "active" : "ghost"} onClick={() => setMode("list")}>List</button>
+      </div>
+    </div>
+    <div className="timetable-filters no-print">
+      <label>Class<select value={filters.classId} onChange={(event) => setFilters({ ...filters, classId: event.target.value })}><option value="">All classes</option>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select></label>
+      <label>Teacher<select value={filters.teacherId} onChange={(event) => setFilters({ ...filters, teacherId: event.target.value })}><option value="">All teachers</option>{config?.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.staffId} - {teacher.firstName} {teacher.lastName}</option>)}</select></label>
+      <label>Day<select value={filters.dayOfWeek} onChange={(event) => setFilters({ ...filters, dayOfWeek: event.target.value })}><option value="">All days</option>{days.map((day) => <option key={day} value={String(day)}>{weekdayLabel(day)}</option>)}</select></label>
+    </div>
+    {canManageTimetable ? <form className="workflow-form" onSubmit={(event) => void createEntry(event)}>
+      <label>Class<select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value, streamId: config?.classes.find((klass) => klass.id === event.target.value)?.streams[0]?.id ?? "" })}><option value="">Class</option>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select></label>
+      <label>Stream<select value={form.streamId} onChange={(event) => setForm({ ...form, streamId: event.target.value })}><option value="">All streams</option>{currentClass?.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select></label>
+      <label>Subject<select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><option value="">Subject</option>{config?.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
+      <label>Teacher<select value={form.teacherId} onChange={(event) => setForm({ ...form, teacherId: event.target.value })}><option value="">Teacher</option>{config?.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.staffId} - {teacher.firstName} {teacher.lastName}</option>)}</select></label>
+      <label>Day<select value={form.dayOfWeek} onChange={(event) => setForm({ ...form, dayOfWeek: event.target.value })}>{days.map((day) => <option key={day} value={String(day)}>{weekdayLabel(day)}</option>)}</select></label>
+      <label>Period<input type="number" min="1" placeholder="Period" value={form.periodNumber} onChange={(event) => setForm({ ...form, periodNumber: event.target.value })} /></label>
+      <label>Starts<input type="time" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} /></label>
+      <label>Ends<input type="time" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} /></label>
+      <label>Room<input placeholder="Room" value={form.room} onChange={(event) => setForm({ ...form, room: event.target.value })} /></label>
+      <button type="submit" disabled={Boolean(clientTimetableConflict)}>Add Lesson</button>
+    </form> : <p className="panel-copy">You can review timetable entries. Lesson creation is available to staff with timetable management permission.</p>}
+    {canManageTimetable && clientTimetableConflict && <p className="setup-warning">Conflict warning: {clientTimetableConflict}</p>}
+    {mode === "grid" ? (
+      <div className="weekly-timetable">
+        {days.map((day) => {
+          const dayRows = filteredRows.filter((row) => Number(row.dayOfWeek) === day).sort((left, right) => Number(left.periodNumber) - Number(right.periodNumber));
+          return <article key={day} className="timetable-day-card"><h4>{weekdayLabel(day)}</h4>{dayRows.length === 0 ? <p>No lessons scheduled.</p> : dayRows.map((row) => <div key={row.id} className="lesson-card"><span>Period {row.periodNumber} · {row.startsAt}-{row.endsAt}</span><strong>{subjects.get(row.subjectId) ?? "Subject not found"}</strong><small>{classes.get(row.classId) ?? "Class not found"}{row.streamId ? ` · ${streams.get(row.streamId) ?? "Stream"}` : ""}</small><small>{teachers.get(row.teacherId) ?? "Teacher not found"}{row.room ? ` · ${row.room}` : ""}</small></div>)}</article>;
+        })}
+      </div>
+    ) : (
+      <DataTable label="Timetable entries"><thead><tr><th scope="col">Day</th><th scope="col">Period</th><th scope="col">Class</th><th scope="col">Subject</th><th scope="col">Teacher</th><th scope="col">Time</th><th scope="col">Room</th></tr></thead><tbody>
+        {filteredRows.map((row) => <tr key={row.id}><td>{weekdayLabel(row.dayOfWeek)}</td><td>{row.periodNumber}</td><td>{classes.get(row.classId) ?? "Class not found"}</td><td>{subjects.get(row.subjectId) ?? "Subject not found"}</td><td>{teachers.get(row.teacherId) ?? "Teacher not found"}</td><td>{row.startsAt}-{row.endsAt}</td><td>{row.room ?? "Not assigned"}</td></tr>)}
+        {filteredRows.length === 0 && <tr><td colSpan={7} className="empty">No timetable entries match this view.</td></tr>}
+      </tbody></DataTable>
+    )}
   </section>;
 }
 
@@ -3444,6 +3485,25 @@ function paymentReversalStatus(reversals?: Array<{ approvalStatus: string }>) {
   if (reversals.some((item) => item.approvalStatus === "PENDING")) return "Pending";
   if (reversals.some((item) => item.approvalStatus === "REJECTED")) return "Rejected";
   return financeLabel(reversals[0]?.approvalStatus);
+}
+
+function timetableConflictMessage(rows: any[], form: { classId: string; streamId: string; teacherId: string; room: string; dayOfWeek: string; periodNumber: string; startsAt: string; endsAt: string }) {
+  if (!form.classId || !form.teacherId || !form.dayOfWeek || !form.periodNumber) return "";
+  if (form.startsAt >= form.endsAt) return "Start time must be before end time.";
+  const room = form.room.trim().toLowerCase();
+  const conflict = rows.find((row) => (
+    String(row.dayOfWeek) === form.dayOfWeek &&
+    String(row.periodNumber) === form.periodNumber &&
+    (
+      row.teacherId === form.teacherId ||
+      (row.classId === form.classId && (row.streamId ?? "") === (form.streamId || "")) ||
+      Boolean(room && String(row.room ?? "").trim().toLowerCase() === room)
+    )
+  ));
+  if (!conflict) return "";
+  if (conflict.teacherId === form.teacherId) return "That teacher already has a lesson in this period.";
+  if (conflict.classId === form.classId && (conflict.streamId ?? "") === (form.streamId || "")) return "That class or stream already has a lesson in this period.";
+  return "That room is already used in this period.";
 }
 
 function defaultFinanceDueDate(config: SchoolConfig | null) {

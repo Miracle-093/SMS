@@ -6,6 +6,7 @@ import { AttendanceService } from "../src/attendance/attendance.service.js";
 import { FinanceService } from "../src/finance/finance.service.js";
 import { SyncService } from "../src/sync/sync.service.js";
 import { StudentsService } from "../src/students/students.service.js";
+import { TimetableService } from "../src/timetable/timetable.service.js";
 import { UsersService } from "../src/users/users.service.js";
 
 const schoolId = "11111111-1111-4111-8111-111111111111";
@@ -172,6 +173,33 @@ describe("tenant and referential integrity regressions", () => {
     })).rejects.toBeInstanceOf(BadRequestException);
 
     expect(prisma.assessment.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects timetable entries when academic references are outside the actor school", async () => {
+    const prisma = {
+      academicYear: { findFirst: vi.fn().mockResolvedValue(null) },
+      term: { findFirst: vi.fn().mockResolvedValue({ id: termId }) },
+      class: { findFirst: vi.fn().mockResolvedValue({ id: classId }) },
+      subject: { findFirst: vi.fn().mockResolvedValue({ id: subjectId }) },
+      teacher: { findFirst: vi.fn().mockResolvedValue({ id: teacherId }) },
+      stream: { findFirst: vi.fn() },
+      timetableEntry: { findFirst: vi.fn(), create: vi.fn() }
+    };
+    const service = new TimetableService(prisma as never, { record: vi.fn() } as never);
+
+    await expect(service.create(actor, {
+      academicYearId: termId,
+      termId,
+      classId,
+      subjectId,
+      teacherId,
+      dayOfWeek: 1,
+      periodNumber: 1,
+      startsAt: "08:00",
+      endsAt: "08:40"
+    })).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.timetableEntry.create).not.toHaveBeenCalled();
   });
 
   it("filters sync pulls by role permissions and blocks unauthorized writes", async () => {

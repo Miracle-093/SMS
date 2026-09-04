@@ -16,14 +16,16 @@ export class TimetableService {
   async list(actor: CurrentUser, query: Record<string, string | undefined>) {
     const teacherScope = await this.teacherScope(actor);
     const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
+    const filters = cleanTimetableQuery(query);
     return this.prisma.timetableEntry.findMany({
-      where: { schoolId: actor.schoolId, deletedAt: null, academicYearId: query.academicYearId, termId: query.termId, classId: query.classId, streamId: query.streamId, teacherId: teacherScope ?? query.teacherId, ...(scopedClassIds ? { AND: [{ classId: { in: scopedClassIds } }] } : {}) },
+      where: { schoolId: actor.schoolId, deletedAt: null, academicYearId: filters.academicYearId, termId: filters.termId, classId: filters.classId, streamId: filters.streamId, teacherId: teacherScope ?? filters.teacherId, ...(scopedClassIds ? { AND: [{ classId: { in: scopedClassIds } }] } : {}) },
       orderBy: [{ dayOfWeek: "asc" }, { periodNumber: "asc" }]
     });
   }
 
   async create(actor: CurrentUser, body: unknown) {
     const input = timetableEntrySchema.parse(body);
+    await this.validateOwnership(actor.schoolId, input);
     await assertClassWithinAcademicLevelScope(this.prisma, actor, input.classId);
     if (input.startsAt >= input.endsAt) throw new BadRequestException("Start time must be before end time.");
     const conflict = await this.prisma.timetableEntry.findFirst({
@@ -31,12 +33,21 @@ export class TimetableService {
         schoolId: actor.schoolId,
         termId: input.termId,
         dayOfWeek: input.dayOfWeek,
-        periodNumber: input.periodNumber,
         deletedAt: null,
-        OR: [
-          { teacherId: input.teacherId },
-          { classId: input.classId, streamId: input.streamId ?? null },
-          ...(input.room ? [{ room: input.room }] : [])
+        AND: [
+          {
+            OR: [
+              { teacherId: input.teacherId },
+              { classId: input.classId, streamId: input.streamId ?? null },
+              ...(input.room ? [{ room: input.room }] : [])
+            ]
+          },
+          {
+            OR: [
+              { periodNumber: input.periodNumber },
+              { startsAt: { lt: input.endsAt }, endsAt: { gt: input.startsAt } }
+            ]
+          }
         ]
       }
     });
@@ -52,4 +63,29 @@ export class TimetableService {
     const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
     return teacher?.id ?? "__no_timetable_for_user__";
   }
+
+  private async validateOwnership(schoolId: string, input: { academicYearId: string; termId: string; classId: string; streamId?: string | null; subjectId: string; teacherId: string }) {
+    const [year, term, klass, subject, teacher] = await Promise.all([
+      this.prisma.academicYear.findFirst({ where: { id: input.academicYearId, schoolId } }),
+      this.prisma.term.findFirst({ where: { id: input.termId, academicYear: { schoolId } } }),
+      this.prisma.class.findFirst({ where: { id: input.classId, schoolId } }),
+      this.prisma.subject.findFirst({ where: { id: input.subjectId, schoolId } }),
+      this.prisma.teacher.findFirst({ where: { id: input.teacherId, schoolId } })
+    ]);
+    if (!year || !term || !klass || !subject || !teacher) throw new BadRequestException("Timetable academic year, term, class, subject, and teacher must belong to this school.");
+    if (input.streamId) {
+      const stream = await this.prisma.stream.findFirst({ where: { id: input.streamId, classId: input.classId, schoolId } });
+      if (!stream) throw new BadRequestException("Timetable stream must belong to the selected class.");
+    }
+  }
+}
+
+function cleanTimetableQuery(query: Record<string, string | undefined>) {
+  return {
+    academicYearId: query.academicYearId || undefined,
+    termId: query.termId || undefined,
+    classId: query.classId || undefined,
+    streamId: query.streamId || undefined,
+    teacherId: query.teacherId || undefined
+  };
 }
