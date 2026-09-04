@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { CurrentUser, PermissionKey, SyncEntityType, UserRole } from "@aethina/shared-types";
 import { AcademicsService } from "../src/academics/academics.service.js";
 import { AttendanceService } from "../src/attendance/attendance.service.js";
@@ -72,6 +72,25 @@ describe("tenant and referential integrity regressions", () => {
     })).rejects.toBeInstanceOf(NotFoundException);
 
     expect(tx.feeAdjustment.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second reversal request after a payment has already been reversed", async () => {
+    const prisma = {
+      payment: { findFirst: vi.fn().mockResolvedValue({ id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", schoolId }) },
+      paymentReversal: {
+        findFirst: vi.fn()
+          .mockResolvedValueOnce({ id: "ffffffff-ffff-4fff-8fff-ffffffffffff", approvalStatus: "APPROVED" })
+      },
+      approvalWorkflow: { create: vi.fn() }
+    };
+    const service = new FinanceService(prisma as never, { record: vi.fn() } as never);
+
+    await expect(service.requestReversal(actor, {
+      paymentId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      reason: "Duplicate reversal should be blocked"
+    })).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.approvalWorkflow.create).not.toHaveBeenCalled();
   });
 
   it("rejects marks for students outside the assessment roster before writing marks", async () => {

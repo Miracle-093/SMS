@@ -221,7 +221,7 @@ type InvoiceRecord = {
   balance: string | number;
   dueDate: string;
   student: Student;
-  payments?: Array<{ id: string; receiptNo: string; amount: string | number; method: string; paidAt: string; receipt?: { id: string; receiptNo: string } | null }>;
+  payments?: Array<{ id: string; receiptNo: string; amount: string | number; method: string; paidAt: string; receipt?: { id: string; receiptNo: string } | null; reversals?: Array<{ id: string; approvalStatus: string; reason?: string | null }> }>;
 };
 
 type FeeStructureRecord = {
@@ -1952,6 +1952,36 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
     await load().catch(() => undefined);
   }
 
+  async function reprintReceipt(receiptId: string | undefined) {
+    if (!receiptId) {
+      setMessage("This payment does not have a synchronized receipt yet.");
+      return;
+    }
+    await api(`/finance/receipts/${receiptId}/reprint`, { method: "POST", body: JSON.stringify({}) });
+    setMessage("Receipt marked for reprint. Use Print Receipts for the browser print copy.");
+    await load();
+  }
+
+  async function requestPaymentReversal(paymentId: string, existingStatus: string) {
+    if (existingStatus === "Pending") {
+      setMessage("A reversal request is already pending for this payment.");
+      return;
+    }
+    if (existingStatus === "Approved") {
+      setMessage("This payment has already been reversed.");
+      return;
+    }
+    const reason = window.prompt("Reason for reversal request");
+    if (!reason) return;
+    if (reason.trim().length < 10) {
+      setMessage("Reversal reason must be at least 10 characters.");
+      return;
+    }
+    await api("/finance/reversals", { method: "POST", body: JSON.stringify({ paymentId, reason: reason.trim() }) });
+    setMessage("Payment reversal request submitted for approval.");
+    await load();
+  }
+
   const selectedPaymentInvoice = invoices.find((invoice) => invoice.id === paymentForm.invoiceId);
   const invoiceQuery = invoiceSearch.trim().toLowerCase();
   const filteredInvoices = invoices.filter((invoice) => {
@@ -1960,14 +1990,23 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
   });
   const overdueInvoices = invoices.filter((invoice) => Number(invoice.balance) > 0 && invoice.dueDate && new Date(invoice.dueDate) < new Date());
   const partialInvoices = invoices.filter((invoice) => Number(invoice.amountPaid) > 0 && Number(invoice.balance) > 0);
-  const paymentRows = invoices.flatMap((invoice) => (invoice.payments ?? []).map((payment) => [
-    payment.receipt?.receiptNo ?? payment.receiptNo ?? "-",
-    invoice.invoiceNo,
-    `${invoice.student.firstName} ${invoice.student.lastName}`,
-    ugx(payment.amount),
-    financeLabel(payment.method),
-    dateOnly(payment.paidAt)
-  ]));
+  const paymentRows = invoices.flatMap((invoice) => (invoice.payments ?? []).map((payment) => {
+    const reversalStatus = paymentReversalStatus(payment.reversals);
+    const receiptId = payment.receipt?.id;
+    return [
+      payment.receipt?.receiptNo ?? payment.receiptNo ?? "Pending receipt",
+      invoice.invoiceNo,
+      `${invoice.student.firstName} ${invoice.student.lastName}`,
+      ugx(payment.amount),
+      financeLabel(payment.method),
+      dateOnly(payment.paidAt),
+      <span className={financeStatusClass(reversalStatus)}>{reversalStatus}</span>,
+      <div className="row-actions" key={`${payment.id}-actions`}>
+        <button type="button" className="ghost" disabled={!receiptId} onClick={() => void reprintReceipt(receiptId)}>Reprint</button>
+        <button type="button" className="ghost" disabled={reversalStatus !== "Valid"} onClick={() => void requestPaymentReversal(payment.id, reversalStatus)}>Reverse</button>
+      </div>
+    ];
+  }));
   const expenseRows = expenses.map((expense) => [
     expense.expenseNo ?? "Pending number",
     expense.category,
@@ -2060,7 +2099,7 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
           <button type="submit" disabled={!canRecordPayment}>Record</button>
         </form>
         {lastReceipt && <div className="receipt-result"><strong>{lastReceipt.receiptNo}</strong><span>{lastReceipt.student} paid {ugx(lastReceipt.amount)}. Remaining balance: {ugx(lastReceipt.balance)}.</span></div>}
-        <FinanceTable rows={paymentRows} headings={["Receipt", "Invoice", "Student", "Amount", "Method", "Paid"]} />
+        <FinanceTable rows={paymentRows} headings={["Receipt", "Invoice", "Student", "Amount", "Method", "Paid", "Reversal", "Actions"]} />
       </section>}
       {tab === "expenses" && <section className="operation-panel wide-panel">
         <div className="section-heading"><h3>Expenses</h3><span className="pill">{localExpenses.length} offline pending</span></div>
@@ -3389,14 +3428,22 @@ function financeLabel(value: string | null | undefined) {
 
 function financeStatusClass(value: string | null | undefined) {
   const status = (value ?? "").toUpperCase();
-  if (["PAID", "APPROVED", "ACTIVE"].includes(status)) return "pill success-pill";
+  if (["PAID", "ACTIVE", "VALID"].includes(status)) return "pill success-pill";
   if (["PARTIALLY_PAID", "PENDING", "SUBMITTED", "ISSUED"].includes(status)) return "pill warning-pill";
-  if (["OVERDUE", "REJECTED", "CANCELLED"].includes(status)) return "pill danger-pill";
+  if (["OVERDUE", "REJECTED", "CANCELLED", "APPROVED"].includes(status)) return "pill danger-pill";
   return "pill muted-pill";
 }
 
 function uniqueValues(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((left, right) => left.localeCompare(right));
+}
+
+function paymentReversalStatus(reversals?: Array<{ approvalStatus: string }>) {
+  if (!reversals?.length) return "Valid";
+  if (reversals.some((item) => item.approvalStatus === "APPROVED")) return "Approved";
+  if (reversals.some((item) => item.approvalStatus === "PENDING")) return "Pending";
+  if (reversals.some((item) => item.approvalStatus === "REJECTED")) return "Rejected";
+  return financeLabel(reversals[0]?.approvalStatus);
 }
 
 function defaultFinanceDueDate(config: SchoolConfig | null) {

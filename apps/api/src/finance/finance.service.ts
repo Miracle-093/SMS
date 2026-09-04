@@ -121,7 +121,7 @@ export class FinanceService {
             }
           : undefined
       },
-      include: { student: { include: { currentClass: true } }, lines: true, payments: { include: { receipt: true } }, adjustments: true },
+      include: { student: { include: { currentClass: true } }, lines: true, payments: { include: { receipt: true, reversals: true } }, adjustments: true },
       orderBy: { invoiceDate: "desc" },
       take: 200
     });
@@ -142,9 +142,9 @@ export class FinanceService {
       for (const fee of fees.filter((item) => item.classId === student.currentClassId)) {
         const existing = await this.prisma.studentInvoice.findFirst({ where: { schoolId: actor.schoolId, studentId: student.id, termId: input.termId, feeStructureId: fee.id, deletedAt: null } });
         if (existing) continue;
-        const invoiceNo = await this.nextNumber(actor.schoolId, "INV", "studentInvoice", "invoiceNo");
         const dueDate = input.dueDate ? new Date(input.dueDate) : fee.dueDate ?? new Date();
-        const invoice = await this.prisma.$transaction(async (tx) => {
+        const invoice = await this.withNumberRetry("invoiceNo", async () => this.prisma.$transaction(async (tx) => {
+          const invoiceNo = await this.nextNumber(actor.schoolId, "INV", "studentInvoice", "invoiceNo", tx);
           const row = await tx.studentInvoice.create({
             data: {
               schoolId: actor.schoolId,
@@ -163,7 +163,7 @@ export class FinanceService {
           });
           await tx.studentInvoiceLine.create({ data: { invoiceId: row.id, description: fee.name, category: fee.category, amount: fee.amount } });
           return row;
-        });
+        }));
         created.push(invoice);
       }
     }
@@ -181,8 +181,8 @@ export class FinanceService {
     if (!student || !term || !fee) throw new BadRequestException("Invoice student, term, and fee structure must belong to this school.");
     if (fee.classId !== student.currentClassId) throw new BadRequestException("Fee structure does not match the student's current class.");
     const total = input.lines.reduce((sum, line) => sum + line.amount, 0);
-    const invoiceNo = await this.nextNumber(actor.schoolId, "INV", "studentInvoice", "invoiceNo");
-    const invoice = await this.prisma.$transaction(async (tx) => {
+    const invoice = await this.withNumberRetry("invoiceNo", async () => this.prisma.$transaction(async (tx) => {
+      const invoiceNo = await this.nextNumber(actor.schoolId, "INV", "studentInvoice", "invoiceNo", tx);
       const row = await tx.studentInvoice.create({
         data: {
           schoolId: actor.schoolId,
@@ -201,14 +201,14 @@ export class FinanceService {
       });
       await tx.studentInvoiceLine.createMany({ data: input.lines.map((line) => ({ invoiceId: row.id, ...line })) });
       return row;
-    });
+    }));
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "INVOICE_CREATED", entityType: "INVOICE", entityId: invoice.id, newValue: invoice });
     return invoice;
   }
 
   async recordPayment(actor: CurrentUser, body: unknown, syncDeviceId?: string | null) {
     const input = paymentSchema.parse(body);
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.withNumberRetry("receiptNo", async () => this.prisma.$transaction(async (tx) => {
       const invoice = await tx.studentInvoice.findFirst({ where: { id: input.invoiceId, schoolId: actor.schoolId, deletedAt: null }, include: { student: true } });
       if (!invoice) throw new NotFoundException("Invoice not found.");
       if (invoice.status === InvoiceStatus.Cancelled) throw new BadRequestException("Cancelled invoices cannot receive payments.");
@@ -247,7 +247,7 @@ export class FinanceService {
       });
       await this.createPaymentRiskAlerts(tx, actor, payment, input.amount);
       return { payment, receipt, previousBalance, remainingBalance: newBalance, student: invoice.student };
-    });
+    }));
     await this.audit.record({
       schoolId: actor.schoolId,
       actorId: actor.id,
@@ -279,8 +279,10 @@ export class FinanceService {
     const input = reversalRequestSchema.parse(body);
     const payment = await this.prisma.payment.findFirst({ where: { id: input.paymentId, schoolId: actor.schoolId, deletedAt: null } });
     if (!payment) throw new NotFoundException("Payment not found.");
-    const existing = await this.prisma.paymentReversal.findFirst({ where: { paymentId: payment.id, deletedAt: null, approvalStatus: ApprovalStatus.Pending } });
-    if (existing) throw new ConflictException("A reversal request is already pending for this payment.");
+    const existingApproved = await this.prisma.paymentReversal.findFirst({ where: { paymentId: payment.id, deletedAt: null, approvalStatus: ApprovalStatus.Approved } });
+    if (existingApproved) throw new ConflictException("This payment has already been reversed.");
+    const existingPending = await this.prisma.paymentReversal.findFirst({ where: { paymentId: payment.id, deletedAt: null, approvalStatus: ApprovalStatus.Pending } });
+    if (existingPending) throw new ConflictException("A reversal request is already pending for this payment.");
     const reversal = await this.prisma.paymentReversal.create({
       data: { schoolId: actor.schoolId, paymentId: payment.id, requestedBy: actor.id, createdBy: actor.id, reason: input.reason, approvalStatus: ApprovalStatus.Pending }
     });
@@ -403,7 +405,7 @@ export class FinanceService {
     const input = expenseSchema.parse(body);
     const settings = await this.settings(actor.schoolId);
     const requiresApproval = input.amount >= money(settings.maximumTransactionNoApproval) || input.amount >= money(settings.maximumSingleExpense);
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.withNumberRetry("expenseNo", async () => this.prisma.$transaction(async (tx) => {
       if (input.reference) {
         const duplicate = await tx.expense.findFirst({ where: { schoolId: actor.schoolId, reference: input.reference, deletedAt: null } });
         if (duplicate) throw new ConflictException("Expense reference already exists.");
@@ -450,7 +452,7 @@ export class FinanceService {
       }
       await this.createExpenseRiskAlerts(tx, actor, expense, settings);
       return expense;
-    });
+    }));
     await this.audit.record({ schoolId: actor.schoolId, actorId: actor.id, action: "EXPENSE_CREATED", entityType: "EXPENSE", entityId: result.id, newValue: result });
     return result;
   }
@@ -458,7 +460,7 @@ export class FinanceService {
   async studentFinanceProfile(schoolId: string, studentId: string, query: Record<string, string | undefined>) {
     const invoices = await this.prisma.studentInvoice.findMany({
       where: { schoolId, studentId, deletedAt: null, termId: query.termId },
-      include: { lines: true, payments: { include: { receipt: true } }, adjustments: true, term: true },
+      include: { lines: true, payments: { include: { receipt: true, reversals: true } }, adjustments: true, term: true },
       orderBy: { invoiceDate: "desc" }
     });
     return {
@@ -488,7 +490,7 @@ export class FinanceService {
       return this.prisma.studentInvoice.findMany({ where: { schoolId, deletedAt: null, termId: query.termId }, include: { student: { include: { currentClass: true } } }, orderBy: [{ balance: "desc" }] });
     }
     if (type === "payments") {
-      return this.prisma.payment.findMany({ where: { schoolId, deletedAt: null, ...(query.from || query.to ? { paidAt: this.dateRange(query) } : {}) }, include: { receipt: true, invoice: { include: { student: true } } }, orderBy: { paidAt: "desc" } });
+      return this.prisma.payment.findMany({ where: { schoolId, deletedAt: null, ...(query.from || query.to ? { paidAt: this.dateRange(query) } : {}) }, include: { receipt: true, reversals: true, invoice: { include: { student: true } } }, orderBy: { paidAt: "desc" } });
     }
     if (type === "daily-collections") {
       const start = query.date ? new Date(`${query.date}T00:00:00.000Z`) : new Date(new Date().toISOString().slice(0, 10));
@@ -530,6 +532,17 @@ export class FinanceService {
     return `${prefix}-${year}-${String(count + 1).padStart(5, "0")}`;
   }
 
+  private async withNumberRetry<T>(field: "invoiceNo" | "receiptNo" | "expenseNo", operation: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (!isUniqueConstraintOn(error, field) || attempt === 4) throw error;
+      }
+    }
+    throw new ConflictException(`Could not allocate a unique ${field}. Please retry.`);
+  }
+
   private async createPaymentRiskAlerts(tx: Tx, actor: CurrentUser, payment: { id: string; reference: string | null; paidAt: Date }, amount: number) {
     const settings = await tx.financialSetting.upsert({ where: { schoolId: actor.schoolId }, update: {}, create: { schoolId: actor.schoolId } });
     if (amount >= money(settings.maximumTransactionNoApproval)) {
@@ -564,6 +577,12 @@ export class FinanceService {
 function money(value: Prisma.Decimal | number | string | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return typeof value === "object" && "toNumber" in value ? value.toNumber() : Number(value);
+}
+
+function isUniqueConstraintOn(error: unknown, field: string) {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") return false;
+  const target = error.meta?.target;
+  return Array.isArray(target) ? target.includes(field) : String(target ?? "").includes(field);
 }
 
 function amountWords(amount: number): string {
