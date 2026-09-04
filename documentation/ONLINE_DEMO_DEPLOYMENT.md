@@ -183,13 +183,19 @@ The desktop still uses local SQLite. Only synchronization/API calls switch to th
 
 ## Deployment Status
 
-Production deployment is complete.
+Production deployment was refreshed on 2026-09-05 from commit `4595257faa0d9ac9c3ae61e02f2ec2d53338697d`.
 
 - API deployment: ready, `GET /health` returns `status: ok` and `database: ok`.
 - Portal deployment: ready, root page returns HTTP 200.
 - Admin/Teacher deployment: ready, root page returns HTTP 200.
 - Admin-to-API CORS preflight: HTTP 204 with `Access-Control-Allow-Origin: https://aethina-sms-admin.vercel.app`.
 - Production admin login and portal login were verified against the hosted API.
+
+Latest deployment inspect links:
+
+- API: `https://vercel.com/aethina/aethina-sms-api/6sswB8DpaqFvq3GjKJQbGfgF11kB`
+- Admin/Teacher: `https://vercel.com/aethina/aethina-sms-admin/CdJ5bVVkFcgxakbezWdFFLcPQvKt`
+- Portal: `https://vercel.com/aethina/aethina-sms-portal/7wY6t2UmmW6dEXmtRWxTMNJKokNb`
 
 Deployment-specific fixes:
 

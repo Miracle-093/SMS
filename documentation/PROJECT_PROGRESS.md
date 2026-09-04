@@ -1,6 +1,6 @@
 # Aethina SMS Project Progress
 
-Last updated: August 18, 2026
+Last updated: September 5, 2026
 
 ## Project Overview
 
@@ -10,7 +10,7 @@ Aethina SMS is now set up as a monorepo for Satelite Secondary School, a fiction
 
 - GitHub repository: `https://github.com/Miracle-093/SMS.git`
 - Local workspace: `C:\Users\DELL 7400\Desktop\Aethina SMS`
-- Current main branch includes the latest UI, deployment, documentation, seed, schema, and Phase 1 workflow work.
+- Current main branch includes the latest UI, deployment, documentation, seed, schema, and Phase 1 workflow work through commit `4595257faa0d9ac9c3ae61e02f2ec2d53338697d`.
 
 ## Live Applications
 
@@ -266,6 +266,9 @@ Recent checks completed successfully:
 
 - `npm.cmd run test`
 - `npm.cmd run build`
+- `npm.cmd run build:vercel:api`
+- `npm.cmd run offline:smoke`
+- `npm.cmd run acceptance:phase1` with 14/14 scenarios passing
 - `npm.cmd run test --workspace apps/api`
 - `npm.cmd run test --workspace apps/desktop`
 - `npm.cmd run test --workspace apps/portal`
@@ -277,6 +280,7 @@ Recent checks completed successfully:
 - Admin login verified against hosted API.
 - Student portal login verified against hosted API.
 - Browser responsive smoke testing was completed for desktop and phone layouts using mocked API responses.
+- Production Vercel deployments were refreshed on 2026-09-05 for API, admin/staff, and student/parent portal.
 
 ## Important Current Boundaries
 
@@ -294,12 +298,12 @@ The system is now a strong Phase 1 pilot, but it is not yet a finished commercia
 
 Recommended next build priorities:
 
-1. Add full user and role management screens.
-2. Build dedicated Teacher Workspace and Bursar Workspace dashboards rather than only filtering the shared admin shell.
-3. Add create/edit workflows for teachers, subjects, exams, assessments, inventory, payroll profiles, and announcements.
-4. Add printable receipts, invoices, report cards, and payslips.
-5. Add stronger dashboard charts and school leadership reports.
-6. Add file upload storage for student photos and documents.
+1. Complete full user and role management screens.
+2. Expand teacher and class-teacher workspace tools for class imports, class portal ownership, and controlled marks editing.
+3. Expand Bursar Workspace workflows for reminders, cash-flow views, and budget record keeping.
+4. Add richer DOS scope management for lower, middle, and upper school academic offices.
+5. Add file upload storage for student photos and documents.
+6. Add stronger dashboard charts and school leadership reports.
 7. Add audit-friendly approval detail screens.
 8. Add end-to-end browser tests as committed test scripts.
 9. Add production security hardening before using real school data.
