@@ -8,6 +8,7 @@ import { AuthGuard } from "../src/common/auth.guard.js";
 import { TokenService } from "../src/auth/token.service.js";
 import { SyncController } from "../src/sync/sync.controller.js";
 import { SyncService } from "../src/sync/sync.service.js";
+import { PrismaService } from "../src/prisma/prisma.service.js";
 
 const userSchoolId = "11111111-1111-4111-8111-111111111111";
 const bodySchoolId = "22222222-2222-4222-8222-222222222222";
@@ -39,6 +40,26 @@ describe("Security stabilization regressions", () => {
         AuthGuard,
         { provide: ConfigService, useValue: config },
         { provide: TokenService, useValue: tokenService },
+        {
+          provide: PrismaService,
+          useValue: {
+            user: {
+              findFirst: vi.fn().mockResolvedValue({
+                ...currentUser,
+                isActive: true,
+                roles: [{
+                  role: {
+                    name: "ADMIN",
+                    permissions: [
+                      { permission: { key: "sync.review" } },
+                      { permission: { key: "students.read" } }
+                    ]
+                  }
+                }]
+              })
+            }
+          }
+        },
         {
           provide: SyncService,
           useValue: {

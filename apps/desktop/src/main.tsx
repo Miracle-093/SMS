@@ -2208,6 +2208,10 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [activeTab, setActiveTab] = useState<"directory" | "create" | "roles" | "scope" | "security">("directory");
+  const [loadState, setLoadState] = useState<MetricState>("loading");
+  const [selectedUserId, setSelectedUserId] = useState("");
   const [resetUserId, setResetUserId] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [createForm, setCreateForm] = useState({ displayName: "", email: "", temporaryPassword: "", roleIds: [] as string[] });
@@ -2218,9 +2222,16 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const [nextUsers, nextRoles] = await Promise.all([api("/users"), api("/users/roles")]);
-    setUsers(asArray<UserRecord>(nextUsers));
-    setRoles(asArray<RoleOption>(nextRoles));
+    setLoadState("loading");
+    try {
+      const [nextUsers, nextRoles] = await Promise.all([api("/users"), api("/users/roles")]);
+      setUsers(asArray<UserRecord>(nextUsers));
+      setRoles(asArray<RoleOption>(nextRoles));
+      setLoadState("ready");
+    } catch (error) {
+      setLoadState("unavailable");
+      throw error;
+    }
   }
 
   useEffect(() => {
@@ -2231,24 +2242,30 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
     const haystack = `${user.displayName} ${user.email} ${roleNames(user).join(" ")}`.toLowerCase();
     const matchesSearch = !search || haystack.includes(search.toLowerCase());
     const matchesStatus = !status || (status === "ACTIVE" ? user.isActive : !user.isActive);
-    return matchesSearch && matchesStatus;
+    const matchesRole = !roleFilter || roleNames(user).includes(roleFilter);
+    return matchesSearch && matchesStatus && matchesRole;
   });
   const selectedResetUser = users.find((user) => user.id === resetUserId);
   const selectedRoleUser = users.find((user) => user.id === roleEditUserId);
   const selectedScopeUser = users.find((user) => user.id === scopeUserId);
+  const selectedUser = users.find((user) => user.id === selectedUserId) ?? filteredUsers[0];
   const academicUsers = users.filter(isAcademicScopeCandidate);
   const roleSummary = summarizeRoles(users);
+  const roleOptions = roles.map((role) => role.name).sort((a, b) => a.localeCompare(b));
 
   async function setActive(user: UserRecord, isActive: boolean) {
     if (user.id === session.user.id && !isActive) {
       setMessage("You cannot deactivate your own active session.");
       return;
     }
+    if (!isActive && !window.confirm(`Deactivate ${user.displayName}? They will not be able to sign in until reactivated.`)) return;
     setBusy(true);
     try {
       await api(`/users/${user.id}/${isActive ? "activate" : "deactivate"}`, { method: "POST", body: "{}" });
       setMessage(`${user.displayName} ${isActive ? "reactivated" : "deactivated"}.`);
       await load();
+    } catch (error) {
+      setMessage(userMessage(error, `${isActive ? "Reactivation" : "Deactivation"} failed.`));
     } finally {
       setBusy(false);
     }
@@ -2260,12 +2277,15 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
       setMessage("Choose a user before resetting a password.");
       return;
     }
+    if (!window.confirm(`Reset password for ${selectedResetUser?.displayName ?? "selected user"}? They will be required to change it after signing in.`)) return;
     setBusy(true);
     try {
       await api("/users/reset-password", { method: "POST", body: JSON.stringify({ userId: resetUserId, temporaryPassword }) });
       setTemporaryPassword("");
       setMessage(`Temporary password set for ${selectedResetUser?.displayName ?? "selected user"}.`);
       await load();
+    } catch (error) {
+      setMessage(userMessage(error, "Password reset failed."));
     } finally {
       setBusy(false);
     }
@@ -2281,8 +2301,11 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
     try {
       await api("/users", { method: "POST", body: JSON.stringify(createForm) });
       setCreateForm({ displayName: "", email: "", temporaryPassword: "", roleIds: [] });
+      setActiveTab("directory");
       setMessage("User created with temporary password and assigned roles.");
       await load();
+    } catch (error) {
+      setMessage(userMessage(error, "User creation failed."));
     } finally {
       setBusy(false);
     }
@@ -2301,6 +2324,8 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
       setRoleEditIds([]);
       setMessage(`Roles updated for ${selectedRoleUser?.displayName ?? "selected user"}.`);
       await load();
+    } catch (error) {
+      setMessage(userMessage(error, "Role update failed."));
     } finally {
       setBusy(false);
     }
@@ -2309,17 +2334,21 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
   function startRoleEdit(user: UserRecord) {
     setRoleEditUserId(user.id);
     setRoleEditIds(user.roles.map((item) => item.role.id));
+    setSelectedUserId(user.id);
+    setActiveTab("roles");
   }
 
   function startScopeEdit(user: UserRecord) {
     setScopeUserId(user.id);
     setScopeBands((user.academicScopeAssignments ?? []).map((scope) => scope.band));
+    setSelectedUserId(user.id);
+    setActiveTab("scope");
   }
 
   async function saveAcademicScopes(event: React.FormEvent) {
     event.preventDefault();
-    if (!scopeUserId || scopeBands.length === 0) {
-      setMessage("Choose an academic user and at least one school division.");
+    if (!scopeUserId) {
+      setMessage("Choose an academic user before saving a school division scope.");
       return;
     }
     setBusy(true);
@@ -2327,169 +2356,257 @@ function UsersRolesView({ api, session, setMessage }: { api: (path: string, init
       await api(`/users/${scopeUserId}/academic-scopes`, { method: "POST", body: JSON.stringify({ bands: scopeBands }) });
       setMessage(`Academic scope updated for ${selectedScopeUser?.displayName ?? "selected user"}.`);
       await load();
+    } catch (error) {
+      setMessage(userMessage(error, "Academic scope update failed."));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section className="operation-panel wide-panel">
-      <div className="section-heading">
+    <section className="operation-panel wide-panel user-admin-shell">
+      <div className="section-heading user-admin-heading">
         <div>
           <h3>User & Role Management</h3>
-          <p className="panel-copy">Manage staff access, temporary passwords, account status, and role visibility.</p>
+          <p className="panel-copy">Manage staff access, temporary passwords, account status, role visibility, and DOS academic divisions.</p>
         </div>
-        <button type="button" onClick={() => void load()} disabled={busy}>Refresh</button>
+        <div className="row-actions">
+          <span className="pill">{workspaceIdentityFor(session.user.roles, session.user.permissions)}</span>
+          <button type="button" onClick={() => void load().catch((error) => setMessage(userMessage(error, "Users unavailable.")))} disabled={busy || loadState === "loading"}>Refresh</button>
+        </div>
       </div>
 
-      <div className="summary-strip">
-        <span>{users.filter((user) => user.isActive).length} active users</span>
-        <span>{users.filter((user) => !user.isActive).length} inactive users</span>
-        <span>{users.filter((user) => user.mustChangePassword).length} password resets pending</span>
-        <span>{roleSummary.length} roles in use</span>
+      <div className="summary-strip user-admin-metrics">
+        <span><strong>{countMetric(users.filter((user) => user.isActive).length, loadState)}</strong> active users</span>
+        <span><strong>{countMetric(users.filter((user) => !user.isActive).length, loadState)}</strong> inactive users</span>
+        <span><strong>{countMetric(users.filter((user) => user.mustChangePassword).length, loadState)}</strong> password resets pending</span>
+        <span><strong>{countMetric(roleSummary.length, loadState)}</strong> roles in use</span>
       </div>
 
-      <div className="filters user-filters">
-        <input placeholder="Search name, email, or role" value={search} onChange={(event) => setSearch(event.target.value)} />
-        <select value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">All statuses</option>
-          <option value="ACTIVE">Active</option>
-          <option value="INACTIVE">Inactive</option>
-        </select>
-        <button type="button" onClick={() => { setSearch(""); setStatus(""); }}>Clear</button>
-      </div>
-
-      <div className="role-matrix">
-        {roleSummary.map((role) => (
-          <div key={role.name}>
-            <strong>{formatRoleName(role.name)}</strong>
-            <span>{role.count} user{role.count === 1 ? "" : "s"}</span>
-          </div>
+      <div className="tabs user-admin-tabs" role="tablist" aria-label="User management sections">
+        {[
+          ["directory", "Directory"],
+          ["create", "Create User"],
+          ["roles", "Role Catalogue"],
+          ["scope", "DOS Scope"],
+          ["security", "Security"]
+        ].map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={activeTab === id} className={activeTab === id ? "active" : undefined} onClick={() => setActiveTab(id as typeof activeTab)}>
+            {label}
+          </button>
         ))}
-        {roleSummary.length === 0 && <div><strong>No roles</strong><span>No role assignments found.</span></div>}
       </div>
 
-      <DataTable label="Users and assigned roles">
-          <thead><tr><th>User</th><th>Roles</th><th>Academic Scope</th><th>Status</th><th>Security</th><th>Last Login</th><th>Actions</th></tr></thead>
-          <tbody>
-            {filteredUsers.map((user) => (
-              <tr key={user.id}>
-                <td>{user.displayName}<br /><small>{user.email}</small></td>
-                <td><div className="pill-stack">{roleNames(user).map((role) => <span className="pill" key={role}>{formatRoleName(role)}</span>)}</div></td>
-                <td><AcademicScopeBadges scopes={user.academicScopeAssignments ?? []} /></td>
-                <td><span className="pill">{user.isActive ? "ACTIVE" : "INACTIVE"}</span></td>
-                <td>
-                  {user.mustChangePassword ? "Password reset pending" : "Password current"}
-                  {user.lockedUntil && <><br /><small>Locked until {new Date(user.lockedUntil).toLocaleString()}</small></>}
-                  {user.failedLoginAttempts > 0 && <><br /><small>{user.failedLoginAttempts} failed login attempt{user.failedLoginAttempts === 1 ? "" : "s"}</small></>}
-                </td>
-                <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : "Never"}</td>
-                <td className="row-actions">
-                  <button className="ghost" type="button" onClick={() => setResetUserId(user.id)}>Reset</button>
-                  <button className="ghost" type="button" disabled={user.id === session.user.id} onClick={() => startRoleEdit(user)}>Roles</button>
-                  {isAcademicScopeCandidate(user) && <button className="ghost" type="button" onClick={() => startScopeEdit(user)}>Scope</button>}
-                  {user.isActive ? (
-                    <button className="ghost" type="button" disabled={busy || user.id === session.user.id} onClick={() => void setActive(user, false)}>Deactivate</button>
-                  ) : (
-                    <button type="button" disabled={busy} onClick={() => void setActive(user, true)}>Reactivate</button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {filteredUsers.length === 0 && <tr><td colSpan={7} className="empty">No users match the current filters.</td></tr>}
-          </tbody>
-      </DataTable>
-
-      <form className="admin-form-panel" onSubmit={createUser}>
-        <div>
-          <h4>Create Staff User</h4>
-          <p className="panel-copy">New users must change their temporary password after first login.</p>
+      {loadState === "unavailable" ? (
+        <div className="empty-state user-admin-error">
+          <h3>Users unavailable</h3>
+          <p>We could not load the staff directory. Check the API connection and try again.</p>
+          <button type="button" onClick={() => void load().catch((error) => setMessage(userMessage(error, "Users unavailable.")))}>Retry</button>
         </div>
-        <div className="inline-admin-form embedded">
+      ) : activeTab === "directory" ? (
+        <div className="user-admin-layout">
+          <div className="user-directory">
+            <div className="filters user-filters">
+              <input aria-label="Search users" placeholder="Search name, email, or role" value={search} onChange={(event) => setSearch(event.target.value)} />
+              <select aria-label="Filter by role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+                <option value="">All roles</option>
+                {roleOptions.map((role) => <option key={role} value={role}>{formatRoleName(role)}</option>)}
+              </select>
+              <select aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}>
+                <option value="">All statuses</option>
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+              </select>
+              <button type="button" onClick={() => { setSearch(""); setStatus(""); setRoleFilter(""); }}>Clear</button>
+            </div>
+
+            <DataTable label="Users and assigned roles">
+              <thead><tr><th scope="col">User</th><th scope="col">Roles</th><th scope="col">Academic Scope</th><th scope="col">Status</th><th scope="col">Security</th><th scope="col">Last Login</th><th scope="col">Actions</th></tr></thead>
+              <tbody>
+                {loadState === "loading" && <tr><td colSpan={7} className="empty">Loading staff directory...</td></tr>}
+                {loadState === "ready" && filteredUsers.map((user) => (
+                  <tr key={user.id} className={selectedUser?.id === user.id ? "selected-row" : undefined} onClick={() => setSelectedUserId(user.id)}>
+                    <td><strong>{user.displayName}</strong><br /><small>{user.email}</small></td>
+                    <td><div className="pill-stack">{roleNames(user).map((role) => <span className="pill" key={role}>{formatRoleName(role)}</span>)}</div></td>
+                    <td><AcademicScopeBadges scopes={user.academicScopeAssignments ?? []} /></td>
+                    <td><span className={user.isActive ? "status-badge success" : "status-badge neutral"}>{user.isActive ? "Active" : "Inactive"}</span></td>
+                    <td>
+                      {user.mustChangePassword ? "Password reset pending" : "Password current"}
+                      {user.lockedUntil && <><br /><small>Locked until {new Date(user.lockedUntil).toLocaleString()}</small></>}
+                      {user.failedLoginAttempts > 0 && <><br /><small>{user.failedLoginAttempts} failed login attempt{user.failedLoginAttempts === 1 ? "" : "s"}</small></>}
+                    </td>
+                    <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : "Never"}</td>
+                    <td className="row-actions" onClick={(event) => event.stopPropagation()}>
+                      <button className="ghost" type="button" aria-label={`Reset password for ${user.displayName}`} onClick={() => { setResetUserId(user.id); setActiveTab("security"); }}>Reset</button>
+                      <button className="ghost" type="button" aria-label={`Edit roles for ${user.displayName}`} disabled={user.id === session.user.id} onClick={() => startRoleEdit(user)}>Roles</button>
+                      {isAcademicScopeCandidate(user) && <button className="ghost" type="button" aria-label={`Edit DOS scope for ${user.displayName}`} onClick={() => startScopeEdit(user)}>Scope</button>}
+                      {user.isActive ? (
+                        <button className="ghost" type="button" aria-label={`Deactivate ${user.displayName}`} disabled={busy || user.id === session.user.id} onClick={() => void setActive(user, false)}>Deactivate</button>
+                      ) : (
+                        <button type="button" aria-label={`Reactivate ${user.displayName}`} disabled={busy} onClick={() => void setActive(user, true)}>Reactivate</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {loadState === "ready" && filteredUsers.length === 0 && <tr><td colSpan={7} className="empty">No users match the current filters.</td></tr>}
+              </tbody>
+            </DataTable>
+          </div>
+          <UserAccessCard user={selectedUser} session={session} roles={roles} />
+        </div>
+      ) : activeTab === "create" ? (
+        <form className="admin-form-panel user-workflow-panel" onSubmit={createUser}>
+          <div>
+            <h4>Create Staff User</h4>
+            <p className="panel-copy">New users receive role-based access immediately and must change their temporary password after first login.</p>
+          </div>
+          <div className="inline-admin-form embedded">
+            <label>
+              Name
+              <input value={createForm.displayName} onChange={(event) => setCreateForm({ ...createForm, displayName: event.target.value })} placeholder="Full name" required />
+            </label>
+            <label>
+              Email
+              <input type="email" value={createForm.email} onChange={(event) => setCreateForm({ ...createForm, email: event.target.value })} placeholder="name@school.test" required />
+            </label>
+            <label>
+              Temporary password
+              <input type="password" value={createForm.temporaryPassword} minLength={10} onChange={(event) => setCreateForm({ ...createForm, temporaryPassword: event.target.value })} placeholder="At least 10 characters" required />
+            </label>
+            <div className="split-actions">
+              <button type="button" className="ghost" onClick={() => setCreateForm({ ...createForm, temporaryPassword: makeTemporaryPassword() })}>Generate</button>
+              <button type="submit" disabled={busy || createForm.roleIds.length === 0}>Create User</button>
+            </div>
+          </div>
+          <RoleChecklist roles={roles} selected={createForm.roleIds} onChange={(roleIds) => setCreateForm({ ...createForm, roleIds })} />
+        </form>
+      ) : activeTab === "roles" ? (
+        <form className="admin-form-panel user-workflow-panel" onSubmit={saveRoles}>
+          <div className="section-heading compact-heading">
+            <div>
+              <h4>Role Catalogue & Assignment</h4>
+              <p className="panel-copy">{selectedRoleUser ? `${selectedRoleUser.displayName} - ${selectedRoleUser.email}` : "Select a user from the directory, then choose their operational roles."}</p>
+            </div>
+            <button type="submit" disabled={busy || !roleEditUserId || roleEditIds.length === 0}>Save Roles</button>
+          </div>
+          <div className="role-matrix">
+            {roles.map((role) => (
+              <div key={role.id}>
+                <strong>{formatRoleName(role.name)}</strong>
+                <span>{role.description ?? rolePermissionSummary(role)}</span>
+                <small>{role.permissions.length} permission{role.permissions.length === 1 ? "" : "s"} - {role._count?.users ?? 0} user{role._count?.users === 1 ? "" : "s"}</small>
+              </div>
+            ))}
+            {roles.length === 0 && <div><strong>No roles</strong><span>No roles have been configured for this school.</span></div>}
+          </div>
+          <div className="inline-admin-form embedded user-picker-row">
+            <label>
+              Staff user
+              <select value={roleEditUserId} onChange={(event) => {
+                const user = users.find((item) => item.id === event.target.value);
+                setRoleEditUserId(event.target.value);
+                setRoleEditIds(user?.roles.map((item) => item.role.id) ?? []);
+              }}>
+                <option value="">Choose user</option>
+                {users.filter((user) => user.id !== session.user.id).map((user) => <option key={user.id} value={user.id}>{user.displayName} - {user.email}</option>)}
+              </select>
+            </label>
+          </div>
+          <RoleChecklist roles={roles} selected={roleEditIds} onChange={setRoleEditIds} />
+        </form>
+      ) : activeTab === "scope" ? (
+        <form className="admin-form-panel user-workflow-panel" onSubmit={saveAcademicScopes}>
+          <div className="section-heading compact-heading">
+            <div>
+              <h4>DOS Academic Scope</h4>
+              <p className="panel-copy">{selectedScopeUser ? `${selectedScopeUser.displayName} - ${academicScopeText(selectedScopeUser.academicScopeAssignments ?? [])}` : "Assign lower, middle, or upper school ownership to an academic administrator."}</p>
+            </div>
+            <button type="submit" disabled={busy || !scopeUserId}>Save Scope</button>
+          </div>
+          <div className="inline-admin-form embedded user-picker-row">
+            <label>
+              Academic user
+              <select value={scopeUserId} onChange={(event) => {
+                const user = users.find((item) => item.id === event.target.value);
+                setScopeUserId(event.target.value);
+                setScopeBands((user?.academicScopeAssignments ?? []).map((scope) => scope.band));
+              }}>
+                <option value="">Choose DOS user</option>
+                {academicUsers.map((user) => <option key={user.id} value={user.id}>{user.displayName} - {user.email}</option>)}
+              </select>
+            </label>
+            <ScopeChecklist selected={scopeBands} onChange={setScopeBands} />
+          </div>
+        </form>
+      ) : (
+        <form className="inline-admin-form user-workflow-panel" onSubmit={resetPassword}>
+          <div>
+            <h4>Password Reset</h4>
+            <p className="panel-copy">Set a temporary password and require the user to choose a private password at next login.</p>
+          </div>
           <label>
-            Name
-            <input value={createForm.displayName} onChange={(event) => setCreateForm({ ...createForm, displayName: event.target.value })} placeholder="Full name" required />
-          </label>
-          <label>
-            Email
-            <input type="email" value={createForm.email} onChange={(event) => setCreateForm({ ...createForm, email: event.target.value })} placeholder="name@school.test" required />
+            User
+            <select value={resetUserId} onChange={(event) => setResetUserId(event.target.value)}>
+              <option value="">Choose user</option>
+              {users.map((user) => <option key={user.id} value={user.id}>{user.displayName} - {user.email}</option>)}
+            </select>
           </label>
           <label>
             Temporary password
-            <input type="password" value={createForm.temporaryPassword} minLength={10} onChange={(event) => setCreateForm({ ...createForm, temporaryPassword: event.target.value })} placeholder="At least 10 characters" required />
+            <input type="password" value={temporaryPassword} minLength={10} onChange={(event) => setTemporaryPassword(event.target.value)} placeholder="At least 10 characters" required />
           </label>
-          <button type="submit" disabled={busy || createForm.roleIds.length === 0}>Create User</button>
-        </div>
-        <RoleChecklist roles={roles} selected={createForm.roleIds} onChange={(roleIds) => setCreateForm({ ...createForm, roleIds })} />
-      </form>
-
-      <form className="admin-form-panel" onSubmit={saveRoles}>
-        <div className="section-heading compact-heading">
-          <div>
-            <h4>Assign Roles</h4>
-            <p className="panel-copy">{selectedRoleUser ? `${selectedRoleUser.displayName} - ${selectedRoleUser.email}` : "Select a user from the table."}</p>
+          <div className="split-actions">
+            <button type="button" className="ghost" onClick={() => setTemporaryPassword(makeTemporaryPassword())}>Generate</button>
+            <button type="submit" disabled={busy || !resetUserId || temporaryPassword.length < 10}>Set Password</button>
           </div>
-          <button type="submit" disabled={busy || !roleEditUserId || roleEditIds.length === 0}>Save Roles</button>
-        </div>
-        <RoleChecklist roles={roles} selected={roleEditIds} onChange={setRoleEditIds} />
-      </form>
-
-      <form className="admin-form-panel" onSubmit={saveAcademicScopes}>
-        <div className="section-heading compact-heading">
-          <div>
-            <h4>DOS Academic Scope</h4>
-            <p className="panel-copy">{selectedScopeUser ? `${selectedScopeUser.displayName} - ${academicScopeText(selectedScopeUser.academicScopeAssignments ?? [])}` : "Assign lower, middle, or upper school ownership to an academic administrator."}</p>
-          </div>
-          <button type="submit" disabled={busy || !scopeUserId || scopeBands.length === 0}>Save Scope</button>
-        </div>
-        <div className="inline-admin-form embedded">
-          <label>
-            Academic user
-            <select value={scopeUserId} onChange={(event) => {
-              const user = users.find((item) => item.id === event.target.value);
-              setScopeUserId(event.target.value);
-              setScopeBands((user?.academicScopeAssignments ?? []).map((scope) => scope.band));
-            }}>
-              <option value="">Choose DOS user</option>
-              {academicUsers.map((user) => <option key={user.id} value={user.id}>{user.displayName} - {user.email}</option>)}
-            </select>
-          </label>
-          <ScopeChecklist selected={scopeBands} onChange={setScopeBands} />
-        </div>
-      </form>
-
-      <form className="inline-admin-form" onSubmit={resetPassword}>
-        <label>
-          User
-          <select value={resetUserId} onChange={(event) => setResetUserId(event.target.value)}>
-            <option value="">Choose user</option>
-            {users.map((user) => <option key={user.id} value={user.id}>{user.displayName} - {user.email}</option>)}
-          </select>
-        </label>
-        <label>
-          Temporary password
-          <input type="password" value={temporaryPassword} minLength={10} onChange={(event) => setTemporaryPassword(event.target.value)} placeholder="At least 10 characters" required />
-        </label>
-        <button type="submit" disabled={busy || !resetUserId || temporaryPassword.length < 10}>Set Password</button>
-      </form>
+        </form>
+      )}
     </section>
+  );
+}
+
+function UserAccessCard({ user, session, roles }: { user?: UserRecord; session: Session; roles: RoleOption[] }) {
+  if (!user) {
+    return <aside className="user-access-card empty-state"><h3>No user selected</h3><p>Select a staff member to review their role, security, and academic scope.</p></aside>;
+  }
+  return (
+    <aside className="user-access-card" aria-label="Selected user access summary">
+      <div className="profile-header compact">
+        <div className="avatar small">{user.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div>
+        <div>
+          <h3>{user.displayName}</h3>
+          <p>{user.email}</p>
+        </div>
+      </div>
+      <dl className="user-access-list">
+        <div><dt>Status</dt><dd>{user.isActive ? "Active account" : "Inactive account"}</dd></div>
+        <div><dt>Roles</dt><dd>{roleNames(user).map(formatRoleName).join(", ") || "No role assigned"}</dd></div>
+        <div><dt>Workspace</dt><dd>{workspaceIdentityFor(roleNames(user), permissionsForUser(user, roles))}</dd></div>
+        <div><dt>Academic scope</dt><dd>{academicScopeText(user.academicScopeAssignments ?? [])}</dd></div>
+        <div><dt>Password</dt><dd>{user.mustChangePassword ? "Reset pending" : "Current"}</dd></div>
+        <div><dt>Last login</dt><dd>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : "Never"}</dd></div>
+      </dl>
+      {user.id === session.user.id && <p className="panel-copy">This is your active session. Self-deactivation and self-role changes are blocked.</p>}
+    </aside>
   );
 }
 
 function RoleChecklist({ roles, selected, onChange }: { roles: RoleOption[]; selected: string[]; onChange: (roleIds: string[]) => void }) {
   return (
-    <div className="role-checklist">
+    <fieldset className="role-checklist">
+      <legend>Available roles</legend>
       {roles.map((role) => (
         <label key={role.id}>
           <input type="checkbox" checked={selected.includes(role.id)} onChange={() => onChange(toggleId(selected, role.id))} />
           <span>
             <strong>{formatRoleName(role.name)}</strong>
+            <small>{role.description ?? rolePermissionSummary(role)}</small>
             <small>{role.permissions.length} permission{role.permissions.length === 1 ? "" : "s"} - {role._count?.users ?? 0} user{role._count?.users === 1 ? "" : "s"}</small>
           </span>
         </label>
       ))}
       {roles.length === 0 && <div className="empty-state">No roles have been configured for this school.</div>}
-    </div>
+    </fieldset>
   );
 }
 
@@ -3434,6 +3551,31 @@ function viewTitle(view: ActiveView) {
 
 function roleNames(user: UserRecord) {
   return user.roles.map((item) => item.role.name).filter(Boolean);
+}
+
+function permissionsForUser(user: UserRecord, roles: RoleOption[]) {
+  const assignedRoleIds = new Set(user.roles.map((item) => item.role.id));
+  return Array.from(new Set(roles.filter((role) => assignedRoleIds.has(role.id)).flatMap((role) => role.permissions.map((permission) => permission.permission.key))));
+}
+
+function rolePermissionSummary(role: RoleOption) {
+  const keys = role.permissions.map((permission) => permission.permission.key);
+  const domains = Array.from(new Set(keys.map((key) => key.split(".")[0]).filter(Boolean)));
+  const critical = keys.filter((key) => ["users.manage", "finance.manage", "payroll.manage", "audit.read", "sync.review"].includes(key));
+  if (critical.length > 0) return `Includes ${critical.map(humanizePermission).join(", ")}`;
+  return domains.length > 0 ? `Access: ${domains.map(formatRoleName).join(", ")}` : "No permissions assigned";
+}
+
+function humanizePermission(value: string) {
+  return value.replace(".", " ").replace("-", " ");
+}
+
+function makeTemporaryPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const random = new Uint32Array(12);
+  crypto.getRandomValues(random);
+  const body = Array.from(random, (value) => alphabet[value % alphabet.length]).join("");
+  return `Ae${body}7`;
 }
 
 function formatAuditAction(action: string) {

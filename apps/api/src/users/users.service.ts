@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { AcademicLevelBand } from "@prisma/client";
 import { adminPasswordResetSchema, adminUserCreateSchema, adminUserRolesSchema } from "@aethina/validation";
-import type { CurrentUser } from "@aethina/shared-types";
+import { PermissionKey, type CurrentUser } from "@aethina/shared-types";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { AuditService } from "../audit/audit.service.js";
 import { PasswordService } from "../auth/password.service.js";
@@ -93,6 +93,9 @@ export class UsersService {
     if (!previous) {
       throw new NotFoundException("User not found.");
     }
+    if (!isActive) {
+      await this.assertRetainsUserManager(actor.schoolId, userId);
+    }
     const updated = await this.prisma.user.update({
       where: { id: userId },
       data: { isActive, deactivatedAt: isActive ? null : new Date(), lockedUntil: null }
@@ -141,12 +144,15 @@ export class UsersService {
     const input = adminUserRolesSchema.parse(body);
     const user = await this.prisma.user.findFirst({
       where: { id: userId, schoolId: actor.schoolId },
-      include: { roles: { include: { role: true } } }
+      include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } }
     });
     if (!user) {
       throw new NotFoundException("User not found.");
     }
     const roles = await this.rolesForSchool(actor.schoolId, input.roleIds);
+    if (user.isActive && this.rolesGrantPermission(user.roles, PermissionKey.UsersManage) && !this.rolesGrantPermission(roles.map((role) => ({ role })), PermissionKey.UsersManage)) {
+      await this.assertRetainsUserManager(actor.schoolId, userId);
+    }
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.userRole.deleteMany({ where: { userId } });
       await tx.userRole.createMany({ data: roles.map((role) => ({ userId, roleId: role.id })), skipDuplicates: true });
@@ -185,6 +191,10 @@ export class UsersService {
     const uniqueBands = Array.from(new Set(input.bands));
     const scopes = await this.prisma.$transaction(async (tx) => {
       const rows = [];
+      await tx.academicScopeAssignment.updateMany({
+        where: { userId, schoolId: actor.schoolId, band: { notIn: uniqueBands }, isActive: true },
+        data: { isActive: false }
+      });
       for (const band of uniqueBands) {
         const range = bandRanges[band];
         rows.push(await tx.academicScopeAssignment.upsert({
@@ -229,12 +239,33 @@ export class UsersService {
     const uniqueRoleIds = Array.from(new Set(roleIds));
     const roles = await this.prisma.role.findMany({
       where: { schoolId, id: { in: uniqueRoleIds } },
-      select: { id: true, name: true }
+      select: { id: true, name: true, permissions: { include: { permission: true } } }
     });
     if (roles.length !== uniqueRoleIds.length) {
       throw new BadRequestException("One or more roles do not belong to this school.");
     }
     return roles;
+  }
+
+  private async assertRetainsUserManager(schoolId: string, changingUserId: string) {
+    const remainingManagers = await this.prisma.user.count({
+      where: {
+        schoolId,
+        isActive: true,
+        id: { not: changingUserId },
+        roles: { some: { role: { permissions: { some: { permission: { key: PermissionKey.UsersManage } } } } } }
+      }
+    });
+    if (remainingManagers === 0) {
+      throw new BadRequestException("At least one active administrator with user-management access must remain.");
+    }
+  }
+
+  private rolesGrantPermission(
+    roles: Array<{ role: { permissions?: Array<{ permission: { key: string } }> } }>,
+    permissionKey: PermissionKey
+  ) {
+    return roles.some((item) => item.role.permissions?.some((permission) => permission.permission.key === permissionKey));
   }
 
   private userSelect() {
@@ -268,7 +299,6 @@ function parseAcademicScopeAssignment(body: unknown): { bands: AcademicScopeBand
   const bands = Array.isArray((body as { bands?: unknown })?.bands) ? (body as { bands: unknown[] }).bands : [];
   const allowed = new Set<string>(Object.values(AcademicLevelBand));
   const parsed = bands.filter((band): band is AcademicScopeBand => typeof band === "string" && allowed.has(band));
-  if (parsed.length === 0) throw new BadRequestException("Choose at least one academic scope.");
   if (parsed.length !== bands.length) throw new BadRequestException("Academic scope must be lower, middle, or upper school.");
   return { bands: parsed };
 }

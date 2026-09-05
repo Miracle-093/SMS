@@ -274,4 +274,77 @@ describe("tenant and referential integrity regressions", () => {
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
+
+  it("keeps at least one active user-management administrator when deactivating users", async () => {
+    const prisma = {
+      user: {
+        findFirst: vi.fn().mockResolvedValue({ id: "admin-2", schoolId, isActive: true }),
+        count: vi.fn().mockResolvedValue(0),
+        update: vi.fn()
+      }
+    };
+    const service = new UsersService(prisma as never, { record: vi.fn() } as never, {} as never);
+
+    await expect(service.setActive(actor, "admin-2", false)).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.user.count).toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps at least one active user-management administrator when changing roles", async () => {
+    const prisma = {
+      user: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "admin-2",
+          schoolId,
+          isActive: true,
+          roles: [{
+            role: {
+              name: "Administrator",
+              permissions: [{ permission: { key: PermissionKey.UsersManage } }]
+            }
+          }]
+        }),
+        count: vi.fn().mockResolvedValue(0)
+      },
+      role: {
+        findMany: vi.fn().mockResolvedValue([{ id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", name: "Teacher", permissions: [] }])
+      },
+      userRole: {
+        deleteMany: vi.fn(),
+        createMany: vi.fn()
+      },
+      $transaction: vi.fn()
+    };
+    const service = new UsersService(prisma as never, { record: vi.fn() } as never, {} as never);
+
+    await expect(service.assignRoles(actor, "admin-2", { roleIds: ["dddddddd-dddd-4ddd-8ddd-dddddddddddd"] })).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.user.count).toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("deactivates omitted DOS academic scope bands when saving scope assignments", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const upsert = vi.fn().mockResolvedValue({ id: "scope-1", userId: "dos-2", band: "LOWER", minLevel: 1, maxLevel: 2, isActive: true });
+    const prisma = {
+      user: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "dos-2",
+          schoolId,
+          roles: [{ role: { name: "Dean of Studies", permissions: [] } }]
+        })
+      },
+      academicScopeAssignment: { updateMany, upsert },
+      $transaction: vi.fn(async (callback: (tx: { academicScopeAssignment: { updateMany: typeof updateMany; upsert: typeof upsert } }) => unknown) => callback({ academicScopeAssignment: { updateMany, upsert } }))
+    };
+    const service = new UsersService(prisma as never, { record: vi.fn() } as never, {} as never);
+
+    await service.assignAcademicScopes(actor, "dos-2", { bands: ["LOWER"] });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { userId: "dos-2", schoolId, band: { notIn: ["LOWER"] }, isActive: true },
+      data: { isActive: false }
+    });
+  });
 });

@@ -67,15 +67,17 @@ export const passwordChangeSchema = z.object({
   newPassword: z.string().min(10).regex(/[A-Z]/).regex(/[a-z]/).regex(/[0-9]/)
 });
 
+const staffPasswordSchema = z.string().min(10).regex(/[A-Z]/).regex(/[a-z]/).regex(/[0-9]/);
+
 export const adminPasswordResetSchema = z.object({
   userId: z.string().uuid(),
-  temporaryPassword: z.string().min(10)
+  temporaryPassword: staffPasswordSchema
 });
 
 export const adminUserCreateSchema = z.object({
   email: z.string().email(),
   displayName: z.string().min(2).max(120),
-  temporaryPassword: z.string().min(10),
+  temporaryPassword: staffPasswordSchema,
   roleIds: z.array(z.string().uuid()).min(1)
 });
 
