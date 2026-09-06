@@ -62,7 +62,7 @@ const appSections: AppSection[] = [
   { id: "budgets", label: "Budgets", group: "Finance", permissions: [PermissionKey.BudgetManage] },
   { id: "inventory", label: "Inventory", group: "Operations", permissions: [PermissionKey.InventoryManage] },
   { id: "payroll", label: "Payroll", group: "Finance", permissions: [PermissionKey.PayrollRead, PermissionKey.PayrollManage] },
-  { id: "notifications", label: "Notifications", group: "Operations", permissions: [PermissionKey.NotificationsManage, PermissionKey.AnnouncementsManage] },
+  { id: "notifications", label: "Notifications", group: "Operations", permissions: [PermissionKey.MarksEntry, PermissionKey.ReportCardsPrepare, PermissionKey.NotificationsManage, PermissionKey.AnnouncementsManage] },
   { id: "approvals", label: "Approvals", group: "Governance", permissions: [PermissionKey.ApprovalReview] },
   { id: "school", label: "School Setup", group: "Command", permissions: [PermissionKey.SchoolConfigManage, PermissionKey.AcademicSetupManage, PermissionKey.TeacherSubjectsManage, PermissionKey.ClassTeachersManage] },
   { id: "attendance", label: "Staff Attendance", group: "Operations", permissions: [PermissionKey.AttendanceManage] },
@@ -718,7 +718,7 @@ function App() {
         ) : visibleSections.length === 0 ? (
           <PermissionDeniedState sectionName="No sections available" />
         ) : activeView === "dashboard" ? (
-          <DashboardView api={api} session={session} online={online} pendingCount={pendingCount} lastSync={lastSync} setMessage={showMessage} />
+          <DashboardView api={api} session={session} online={online} pendingCount={pendingCount} lastSync={lastSync} setMessage={showMessage} setActiveView={setActiveView} />
         ) : activeView === "academics" ? (
           <AcademicsAdminView api={api} config={config} session={session} scope={workspaceScope} setMessage={showMessage} />
         ) : activeView === "timetable" ? (
@@ -732,7 +732,7 @@ function App() {
         ) : activeView === "payroll" ? (
           <PayrollAdminView api={api} setMessage={showMessage} />
         ) : activeView === "notifications" ? (
-          <NotificationsAdminView api={api} setMessage={showMessage} />
+          <NotificationsAdminView api={api} session={session} setMessage={showMessage} />
         ) : activeView === "approvals" ? (
           <ApprovalsView api={api} setMessage={showMessage} />
         ) : activeView === "users" ? (
@@ -1054,6 +1054,11 @@ function RosterImportPreview({ api, scope, setMessage }: { api: (path: string, i
             {scope.studentFilters.map((filter) => <option key={rosterScopeKey(filter)} value={rosterScopeKey(filter)}>{filter.label}</option>)}
           </select>
         </label>
+        <div className="roster-format-card">
+          <strong>Accepted format</strong>
+          <span>Use one learner per line: admission number, first name, last name, optional middle name.</span>
+          <small>Example: SAT-S1-041, Amina, Kato</small>
+        </div>
         <label className="wide">
           Roster rows
           <textarea
@@ -1065,6 +1070,7 @@ function RosterImportPreview({ api, scope, setMessage }: { api: (path: string, i
         </label>
         <div className="roster-preview-actions">
           <span>{parsedRows.length} parsed row{parsedRows.length === 1 ? "" : "s"}</span>
+          <button type="button" className="ghost" onClick={() => setRawRows("")} disabled={busy || rawRows.length === 0}>Clear</button>
           <button type="submit" disabled={!canPreview}>{busy ? "Checking..." : "Preview roster"}</button>
         </div>
       </form>
@@ -1083,11 +1089,15 @@ function RosterImportPreview({ api, scope, setMessage }: { api: (path: string, i
                 const match = row.admissionNo ? preview.existingMatches.find((item) => item.row.admissionNo === row.admissionNo) : undefined;
                 return <tr key={`${row.admissionNo ?? row.firstName}-${index}`}><td>{index + 1}</td><td>{row.admissionNo ?? "Not provided"}</td><td>{row.firstName} {row.middleName ?? ""} {row.lastName}</td><td><span className="pill">{match ? "Existing student" : "Ready for DOS review"}</span></td></tr>;
               })}
-              {preview.errors.map((error) => <tr key={`error-${error.rowNumber}`}><td>{error.rowNumber}</td><td>{error.row.admissionNo ?? "Not provided"}</td><td>{error.row.firstName} {error.row.lastName}</td><td>{error.messages.join(" ")}</td></tr>)}
+              {preview.errors.map((error) => <tr key={`error-${error.rowNumber}`} className="roster-error-row"><td>{error.rowNumber}</td><td>{error.row.admissionNo ?? "Not provided"}</td><td>{error.row.firstName} {error.row.lastName}</td><td><span className="pill danger-pill">Needs edit</span><br /><small>{error.messages.join(" ")}</small></td></tr>)}
               {preview.totalRows === 0 && <tr><td colSpan={4} className="empty">No roster rows were parsed.</td></tr>}
             </tbody>
           </DataTable>
-          <p className="panel-copy">{preview.nextStep}</p>
+          <div className="roster-next-step">
+            <strong>Next step</strong>
+            <span>{preview.nextStep}</span>
+            <small>Preview mode does not create student records. DOS or admissions staff still complete registration.</small>
+          </div>
         </>
       )}
     </section>
@@ -1589,7 +1599,7 @@ function fromStudent(student: Student, config: SchoolConfig | null): Registratio
   };
 }
 
-function DashboardView({ api, session, online, pendingCount, lastSync, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; session: Session; online: boolean; pendingCount: number; lastSync: string; setMessage: (message: string) => void }) {
+function DashboardView({ api, session, online, pendingCount, lastSync, setMessage, setActiveView }: { api: (path: string, init?: RequestInit) => Promise<any>; session: Session; online: boolean; pendingCount: number; lastSync: string; setMessage: (message: string) => void; setActiveView: (view: ActiveView) => void }) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [teacherWorkspace, setTeacherWorkspace] = useState<TeacherWorkspaceSummary | null>(null);
   const [summaryState, setSummaryState] = useState<MetricState>("loading");
@@ -1666,6 +1676,7 @@ function DashboardView({ api, session, online, pendingCount, lastSync, setMessag
         online={online}
         pendingCount={pendingCount}
         lastSync={lastSync}
+        setActiveView={setActiveView}
         onRefresh={() => void load()}
       />
     );
@@ -1707,9 +1718,10 @@ function DashboardView({ api, session, online, pendingCount, lastSync, setMessag
   );
 }
 
-function TeacherWorkspaceDashboard({ workspace, state, online, pendingCount, lastSync, onRefresh }: { workspace: TeacherWorkspaceSummary | null; state: MetricState; online: boolean; pendingCount: number; lastSync: string; onRefresh: () => void }) {
+function TeacherWorkspaceDashboard({ workspace, state, online, pendingCount, lastSync, setActiveView, onRefresh }: { workspace: TeacherWorkspaceSummary | null; state: MetricState; online: boolean; pendingCount: number; lastSync: string; setActiveView: (view: ActiveView) => void; onRefresh: () => void }) {
   const today = new Date().getDay() || 7;
   const todayLessons = workspace?.timetable.filter((entry) => entry.dayOfWeek === today) ?? [];
+  const hasClassPortal = Boolean((workspace?.classTeacherAssignments ?? []).length);
   const cards = [
     ["Class rooms", countMetric(workspace?.classLearners.length, state)],
     ["Assigned subjects", countMetric(workspace?.subjectAssignments.length, state)],
@@ -1725,14 +1737,41 @@ function TeacherWorkspaceDashboard({ workspace, state, online, pendingCount, las
           <div>
             <p className="eyebrow">My teaching workspace</p>
             <h3>{workspace?.teacher ? `${workspace.teacher.firstName} ${workspace.teacher.lastName}` : "Teacher workspace"}</h3>
-            <p className="panel-copy">Assigned classes, subject load, timetable, assessments, and staff announcements.</p>
+            <p className="panel-copy">{hasClassPortal ? "Class portal, assigned learners, subject load, timetable, report preparation, and staff announcements." : "Assigned subjects, timetable, assessments, and staff announcements."}</p>
           </div>
-          <button type="button" onClick={onRefresh}>Refresh</button>
+          <div className="row-actions">
+            <button type="button" className="ghost" onClick={() => setActiveView("students")} disabled={state === "loading"}>{hasClassPortal ? "Open Class Portal" : "Open Learners"}</button>
+            <button type="button" className="ghost" onClick={() => setActiveView("academics")} disabled={state === "loading"}>Enter Marks</button>
+            <button type="button" className="ghost" onClick={() => setActiveView("timetable")} disabled={state === "loading"}>Timetable</button>
+            <button type="button" onClick={onRefresh}>Refresh</button>
+          </div>
         </div>
         <div className="summary-strip">
           {cards.map(([label, value]) => <span key={label}><strong>{value}</strong>{label}</span>)}
         </div>
       </section>
+
+      {hasClassPortal && <section className="operation-panel wide-panel class-portal-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Class teacher portal</p>
+            <h3>{workspace?.classTeacherAssignments.map((assignment) => assignment.label).join(", ")}</h3>
+            <p className="panel-copy">Use this area to review your assigned class, check roster readiness, prepare report cards, and follow up on missing academic records.</p>
+          </div>
+          <div className="row-actions">
+            <button type="button" className="ghost" onClick={() => setActiveView("students")}>Review Class List</button>
+            <button type="button" onClick={() => setActiveView("academics")}>Prepare Reports</button>
+          </div>
+        </div>
+        <div className="class-portal-strip">
+          {(workspace?.classTeacherAssignments ?? []).map((assignment) => (
+            <article key={assignment.id}>
+              <strong>{assignment.label}</strong>
+              <span>{assignment.academicYear} - {assignment.term}</span>
+            </article>
+          ))}
+        </div>
+      </section>}
 
       <section className="operation-panel">
         <div className="section-heading"><h3>Assigned Classes</h3></div>
@@ -1759,7 +1798,7 @@ function TeacherWorkspaceDashboard({ workspace, state, online, pendingCount, las
         <DataTable label="Open teacher assessments">
           <thead><tr><th>Assessment</th><th>Subject</th><th>Exam</th><th>Status</th></tr></thead>
           <tbody>
-            {(workspace?.openAssessments ?? []).map((assessment) => <tr key={assessment.id}><td>{assessment.name}</td><td>{assessment.subject}</td><td>{assessment.examination}</td><td><span className="pill">{assessment.status}</span></td></tr>)}
+            {(workspace?.openAssessments ?? []).map((assessment) => <tr key={assessment.id} className="clickable-row" tabIndex={0} onClick={() => setActiveView("academics")} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setActiveView("academics"); }}><td>{assessment.name}</td><td>{assessment.subject}</td><td>{assessment.examination}</td><td><span className="pill">{assessment.status}</span></td></tr>)}
             {state === "loading" && <tr><td colSpan={4} className="empty">Loading assessments...</td></tr>}
             {state !== "loading" && (workspace?.openAssessments ?? []).length === 0 && <tr><td colSpan={4} className="empty">No open assessments need marks entry right now.</td></tr>}
           </tbody>
@@ -3090,7 +3129,7 @@ function TimetableAdminView({ api, config, scope, session, setMessage }: { api: 
       <div className="weekly-timetable">
         {days.map((day) => {
           const dayRows = filteredRows.filter((row) => Number(row.dayOfWeek) === day).sort((left, right) => Number(left.periodNumber) - Number(right.periodNumber));
-          return <article key={day} className="timetable-day-card"><h4>{weekdayLabel(day)}</h4>{dayRows.length === 0 ? <p>No lessons scheduled.</p> : dayRows.map((row) => <div key={row.id} className="lesson-card"><span>Period {row.periodNumber} · {row.startsAt}-{row.endsAt}</span><strong>{subjects.get(row.subjectId) ?? "Subject not found"}</strong><small>{classes.get(row.classId) ?? "Class not found"}{row.streamId ? ` · ${streams.get(row.streamId) ?? "Stream"}` : ""}</small><small>{teachers.get(row.teacherId) ?? "Teacher not found"}{row.room ? ` · ${row.room}` : ""}</small></div>)}</article>;
+          return <article key={day} className="timetable-day-card"><h4>{weekdayLabel(day)}</h4>{dayRows.length === 0 ? <p>No lessons scheduled.</p> : dayRows.map((row) => <div key={row.id} className="lesson-card"><span>Period {row.periodNumber} - {row.startsAt}-{row.endsAt}</span><strong>{subjects.get(row.subjectId) ?? "Subject not found"}</strong><small>{classes.get(row.classId) ?? "Class not found"}{row.streamId ? ` - ${streams.get(row.streamId) ?? "Stream"}` : ""}</small><small>{teachers.get(row.teacherId) ?? "Teacher not found"}{row.room ? ` - ${row.room}` : ""}</small></div>)}</article>;
         })}
       </div>
     ) : (
@@ -3126,15 +3165,25 @@ function PayrollAdminView({ api, setMessage }: { api: (path: string, init?: Requ
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Payroll</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["Period", "Status", "Gross", "Deductions", "Net"]} rows={runs.map((run) => [run.period, run.status, ugx(run.grossTotal), ugx(run.deductionTotal), ugx(run.netTotal)])} /><FinanceTable headings={["Teacher", "Period", "Gross", "Deductions", "Net", "Status"]} rows={records.slice(0, 30).map((row) => [row.teacherId, row.period, ugx(row.grossPay), ugx(row.deductions), ugx(row.netPay), row.status])} /></section>;
 }
 
-function NotificationsAdminView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
+function NotificationsAdminView({ api, session, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; session: Session; setMessage: (message: string) => void }) {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>([]);
+  const canManageCommunications = session.user.permissions.includes(PermissionKey.NotificationsManage) || session.user.permissions.includes(PermissionKey.AnnouncementsManage);
   async function load() {
-    const [nextNotifications, nextAnnouncements] = await Promise.all([api("/notifications"), api("/announcements?all=true")]);
-    setNotifications(asArray<any>(nextNotifications));
-    setAnnouncements(asArray<any>(nextAnnouncements));
+    if (canManageCommunications) {
+      const [nextNotifications, nextAnnouncements] = await Promise.all([api("/notifications"), api("/announcements?all=true")]);
+      setNotifications(asArray<any>(nextNotifications));
+      setAnnouncements(asArray<any>(nextAnnouncements));
+      return;
+    }
+    const workspace = await api("/dashboard/teacher-workspace");
+    setNotifications([]);
+    setAnnouncements(asArray<any>(workspace?.announcements));
   }
   useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Notifications unavailable."))); }, []);
+  if (!canManageCommunications) {
+    return <section className="operation-panel wide-panel"><div className="section-heading"><div><h3>Staff Announcements</h3><p className="panel-copy">Read current notices for your teaching workspace.</p></div><button type="button" onClick={() => void load()}>Refresh</button></div><div className="announcement-stack">{announcements.map((row) => <article key={row.id} className="announcement-card"><span className="pill">{row.priority}</span><strong>{row.title}</strong><p>{row.message}</p><small>{dateOnly(row.publishAt)}</small></article>)}{announcements.length === 0 && <div className="empty">No current staff announcements.</div>}</div></section>;
+  }
   return <section className="operation-panel wide-panel"><div className="section-heading"><h3>Notifications & Announcements</h3><button type="button" onClick={() => void load()}>Refresh</button></div><FinanceTable headings={["Title", "Recipient", "Channel", "Status"]} rows={notifications.slice(0, 30).map((row) => [row.title, `${row.recipientType}${row.recipientId ? `:${row.recipientId}` : ""}`, row.channel, row.status])} /><FinanceTable headings={["Announcement", "Audience", "Priority", "Published"]} rows={announcements.map((row) => [row.title, row.audience, row.priority, dateOnly(row.publishAt)])} /></section>;
 }
 

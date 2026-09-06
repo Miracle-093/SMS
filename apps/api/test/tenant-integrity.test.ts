@@ -125,6 +125,37 @@ describe("tenant and referential integrity regressions", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it("rejects teacher edits to finalized assessment marks", async () => {
+    const prisma = {
+      assessment: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: assessmentId,
+          schoolId,
+          subjectId,
+          classId,
+          streamId: null,
+          teacherId,
+          maxScore: 100,
+          weight: 100,
+          status: "APPROVED"
+        })
+      },
+      teacher: { findFirst: vi.fn() },
+      mark: { upsert: vi.fn() },
+      $transaction: vi.fn()
+    };
+    const service = new AcademicsService(prisma as never, { record: vi.fn() } as never);
+
+    await expect(service.saveMarks({ ...actor, permissions: [PermissionKey.MarksEntry] }, {
+      assessmentId,
+      entries: [{ studentId, score: 75 }],
+      status: "DRAFT"
+    })).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.teacher.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("scopes lower-school DOS student lists to S1-S2 classes", async () => {
     const prisma = {
       academicScopeAssignment: { findMany: vi.fn().mockResolvedValue([]) },

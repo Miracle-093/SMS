@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
+import type { Prisma } from "@prisma/client";
 import { type CurrentUser } from "@aethina/shared-types";
 import { PermissionKey } from "@aethina/shared-types";
 import { timetableEntrySchema } from "@aethina/validation";
@@ -17,8 +18,18 @@ export class TimetableService {
     const teacherScope = await this.teacherScope(actor);
     const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
     const filters = cleanTimetableQuery(query);
+    const school = await this.prisma.school.findUnique({ where: { id: actor.schoolId } });
     return this.prisma.timetableEntry.findMany({
-      where: { schoolId: actor.schoolId, deletedAt: null, academicYearId: filters.academicYearId, termId: filters.termId, classId: filters.classId, streamId: filters.streamId, teacherId: teacherScope ?? filters.teacherId, ...(scopedClassIds ? { AND: [{ classId: { in: scopedClassIds } }] } : {}) },
+      where: {
+        schoolId: actor.schoolId,
+        deletedAt: null,
+        academicYearId: filters.academicYearId ?? school?.currentAcademicYearId ?? undefined,
+        termId: filters.termId ?? school?.currentTermId ?? undefined,
+        classId: filters.classId,
+        streamId: filters.streamId,
+        ...(teacherScope ? { OR: teacherScope } : { teacherId: filters.teacherId }),
+        ...(scopedClassIds ? { AND: [{ classId: { in: scopedClassIds } }] } : {})
+      },
       orderBy: [{ dayOfWeek: "asc" }, { periodNumber: "asc" }]
     });
   }
@@ -57,11 +68,28 @@ export class TimetableService {
     return entry;
   }
 
-  private async teacherScope(actor: CurrentUser) {
+  private async teacherScope(actor: CurrentUser): Promise<Prisma.TimetableEntryWhereInput[] | null> {
     const permissions = new Set(actor.permissions);
     if (permissions.has(PermissionKey.TimetableManage) || permissions.has(PermissionKey.AcademicSetupManage)) return null;
     const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
-    return teacher?.id ?? "__no_timetable_for_user__";
+    if (!teacher) return [{ id: "__no_timetable_for_user__" }];
+    const school = await this.prisma.school.findUnique({ where: { id: actor.schoolId } });
+    const classAssignments = await this.prisma.classTeacherAssignment.findMany({
+      where: {
+        schoolId: actor.schoolId,
+        teacherId: teacher.id,
+        isActive: true,
+        ...(school?.currentAcademicYearId ? { academicYearId: school.currentAcademicYearId } : {}),
+        ...(school?.currentTermId ? { OR: [{ termId: null }, { termId: school.currentTermId }] } : {})
+      }
+    });
+    return [
+      { teacherId: teacher.id },
+      ...classAssignments.map((assignment) => ({
+        classId: assignment.classId,
+        ...(assignment.streamId ? { OR: [{ streamId: assignment.streamId }, { streamId: null }] } : {})
+      }))
+    ];
   }
 
   private async validateOwnership(schoolId: string, input: { academicYearId: string; termId: string; classId: string; streamId?: string | null; subjectId: string; teacherId: string }) {

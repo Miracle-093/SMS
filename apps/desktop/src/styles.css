@@ -436,6 +436,35 @@ nav button:hover {
   gap: 12px;
 }
 
+.class-portal-panel {
+  background: #fffdf8;
+  border-color: #e4d4ab;
+}
+
+.class-portal-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.class-portal-strip article {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #e5d7b5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.class-portal-strip strong {
+  color: var(--ink);
+}
+
+.class-portal-strip span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .role-focus-panel {
   min-width: 0;
   border: 1px solid #e2e8ee;
@@ -1668,6 +1697,38 @@ td.row-actions {
   gap: 12px;
   padding: 12px 14px;
   border-bottom: 1px solid #edf1f4;
+}
+
+.roster-format-card,
+.roster-next-step {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #dfe6ec;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.roster-format-card strong,
+.roster-next-step strong {
+  color: var(--ink);
+}
+
+.roster-format-card small,
+.roster-next-step small {
+  color: #657485;
+}
+
+.roster-next-step {
+  margin-top: 12px;
+  border-color: #d9bd75;
+  background: #fffaf0;
+}
+
+.roster-error-row td {
+  background: #fff6f4;
 }
 
 .roster-preview-form label {

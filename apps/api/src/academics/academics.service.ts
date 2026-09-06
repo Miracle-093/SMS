@@ -95,6 +95,9 @@ export class AcademicsService {
     const input = marksEntrySchema.parse(body);
     const assessment = await this.prisma.assessment.findFirst({ where: { id: input.assessmentId, schoolId: actor.schoolId } });
     if (!assessment) throw new NotFoundException("Assessment not found.");
+    if (!["DRAFT", "OPEN", "MARKS_ENTRY", "RETURNED_FOR_CORRECTION"].includes(assessment.status)) {
+      throw new BadRequestException("Marks can only be edited before DOS approval or after they are returned for correction.");
+    }
     await this.assertTeacherCanEnterMarks(actor, assessment);
     const maxScore = money(assessment.maxScore);
     const submittedStudentIds = input.entries.map((entry) => entry.studentId);
@@ -223,6 +226,10 @@ export class AcademicsService {
     const classTeacherScopes = await this.classTeacherScopes(actor);
     const scopedClassIds = await classIdsForAcademicLevelScope(this.prisma, actor);
     const studentScope: Prisma.StudentWhereInput[] = [];
+    const permissions = new Set(actor.permissions);
+    if (!permissions.has(PermissionKey.ReportCardsPublish) && !permissions.has(PermissionKey.AcademicsManage) && !scopedClassIds && classTeacherScopes.length === 0) {
+      throw new BadRequestException("Only an assigned class teacher or academic office can prepare report cards.");
+    }
     if (classTeacherScopes.length) studentScope.push({ OR: classTeacherScopes });
     if (scopedClassIds) studentScope.push(scopedClassIds.length ? { currentClassId: { in: scopedClassIds } } : { id: "__no_students_for_academic_scope__" });
     const marks = await this.prisma.mark.findMany({
@@ -357,7 +364,7 @@ export class AcademicsService {
         teacherId: teacher.id,
         subjectId: assessment.subjectId,
         classId: assessment.classId ?? undefined,
-        streamId: assessment.streamId ?? null,
+        OR: assessment.streamId ? [{ streamId: assessment.streamId }, { streamId: null }] : [{ streamId: null }],
         isActive: true
       }
     });
@@ -372,13 +379,18 @@ export class AcademicsService {
     if (!card) throw new NotFoundException("Report card not found.");
     const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
     if (!teacher || !card.classId) throw new BadRequestException("Only the assigned class teacher can prepare this report card.");
+    const school = await this.prisma.school.findUnique({ where: { id: actor.schoolId } });
     const assignment = await this.prisma.classTeacherAssignment.findFirst({
       where: {
         schoolId: actor.schoolId,
         teacherId: teacher.id,
         classId: card.classId,
-        streamId: card.streamId ?? null,
-        isActive: true
+        isActive: true,
+        ...(school?.currentAcademicYearId ? { academicYearId: school.currentAcademicYearId } : {}),
+        AND: [
+          { OR: card.streamId ? [{ streamId: card.streamId }, { streamId: null }] : [{ streamId: null }] },
+          school?.currentTermId ? { OR: [{ termId: null }, { termId: school.currentTermId }] } : {}
+        ]
       }
     });
     if (!assignment) throw new BadRequestException("Only the assigned class teacher can prepare this report card.");
@@ -397,7 +409,16 @@ export class AcademicsService {
     if (actor.permissions.includes(PermissionKey.ReportCardsPublish)) return [];
     const teacher = await this.prisma.teacher.findFirst({ where: { schoolId: actor.schoolId, userId: actor.id } });
     if (!teacher) return [];
-    const assignments = await this.prisma.classTeacherAssignment.findMany({ where: { schoolId: actor.schoolId, teacherId: teacher.id, isActive: true } });
+    const school = await this.prisma.school.findUnique({ where: { id: actor.schoolId } });
+    const assignments = await this.prisma.classTeacherAssignment.findMany({
+      where: {
+        schoolId: actor.schoolId,
+        teacherId: teacher.id,
+        isActive: true,
+        ...(school?.currentAcademicYearId ? { academicYearId: school.currentAcademicYearId } : {}),
+        ...(school?.currentTermId ? { OR: [{ termId: null }, { termId: school.currentTermId }] } : {})
+      }
+    });
     return assignments.map((assignment) => ({
       currentClassId: assignment.classId,
       ...(assignment.streamId ? { currentStreamId: assignment.streamId } : {})

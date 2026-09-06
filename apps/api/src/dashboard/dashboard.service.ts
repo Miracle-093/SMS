@@ -118,35 +118,63 @@ export class DashboardService {
 
     const school = await this.prisma.school.findUnique({ where: { id: user.schoolId } });
     const now = new Date();
-    const [classTeacherAssignments, subjectAssignments, timetable, announcements] = await Promise.all([
+    const [classTeacherAssignments, subjectAssignments] = await Promise.all([
       this.prisma.classTeacherAssignment.findMany({
-        where: { schoolId: user.schoolId, teacherId: teacher.id, isActive: true },
+        where: {
+          schoolId: user.schoolId,
+          teacherId: teacher.id,
+          isActive: true,
+          ...(school?.currentAcademicYearId ? { academicYearId: school.currentAcademicYearId } : {}),
+          ...(school?.currentTermId ? { OR: [{ termId: null }, { termId: school.currentTermId }] } : {})
+        },
         include: { class: true, stream: true, academicYear: true, term: true },
         orderBy: { createdAt: "desc" }
       }),
       this.prisma.teacherSubjectAssignment.findMany({
         where: { schoolId: user.schoolId, teacherId: teacher.id, isActive: true },
         orderBy: { createdAt: "desc" }
-      }),
-      this.prisma.timetableEntry.findMany({
-        where: { schoolId: user.schoolId, teacherId: teacher.id, deletedAt: null, academicYearId: school?.currentAcademicYearId ?? undefined, termId: school?.currentTermId ?? undefined },
-        orderBy: [{ dayOfWeek: "asc" }, { periodNumber: "asc" }],
-        take: 30
-      }),
-      this.prisma.announcement.findMany({
-        where: {
-          schoolId: user.schoolId,
-          deletedAt: null,
-          publishAt: { lte: now },
+      })
+    ]);
+    const timetableVisibility = [
+      { teacherId: teacher.id },
+      ...classTeacherAssignments.map((assignment) => ({
+        classId: assignment.classId,
+        ...(assignment.streamId ? { OR: [{ streamId: null }, { streamId: assignment.streamId }] } : {})
+      }))
+    ];
+    const timetable = await this.prisma.timetableEntry.findMany({
+      where: {
+        schoolId: user.schoolId,
+        deletedAt: null,
+        academicYearId: school?.currentAcademicYearId ?? undefined,
+        termId: school?.currentTermId ?? undefined,
+        OR: timetableVisibility
+      },
+      orderBy: [{ dayOfWeek: "asc" }, { periodNumber: "asc" }],
+      take: 30
+    });
+    const announcements = await this.prisma.announcement.findMany({
+      where: {
+        schoolId: user.schoolId,
+        deletedAt: null,
+        publishAt: { lte: now },
+        OR: [
+          { audience: { in: ["ALL", "STAFF", "TEACHERS", "TEACHER"] } },
+          ...classTeacherAssignments.map((assignment) => ({
+            classId: assignment.classId,
+            ...(assignment.streamId ? { OR: [{ streamId: null }, { streamId: assignment.streamId }] } : {})
+          }))
+        ],
+        AND: [{
           OR: [
             { expiresAt: null },
             { expiresAt: { gte: now } }
           ]
-        },
-        orderBy: [{ priority: "desc" }, { publishAt: "desc" }],
-        take: 10
-      })
-    ]);
+        }]
+      },
+      orderBy: [{ priority: "desc" }, { publishAt: "desc" }],
+      take: 10
+    });
     const assessmentScopes = subjectAssignments.map((assignment) => ({
       subjectId: assignment.subjectId,
       classId: assignment.classId,
@@ -155,7 +183,7 @@ export class DashboardService {
     const openAssessments = await this.prisma.assessment.findMany({
       where: {
         schoolId: user.schoolId,
-        status: { in: ["DRAFT", "OPEN", "RETURNED_FOR_CORRECTION"] },
+        status: { in: ["DRAFT", "OPEN", "MARKS_ENTRY", "RETURNED_FOR_CORRECTION"] },
         ...(school?.currentTermId ? { termId: school.currentTermId } : {}),
         OR: [{ teacherId: teacher.id }, ...assessmentScopes]
       },
