@@ -1550,6 +1550,46 @@ td.row-actions {
   font-weight: 750;
 }
 
+.finance-ops-grid,
+.finance-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.finance-action-list {
+  display: grid;
+  gap: 8px;
+}
+
+.finance-action-list button {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) 1fr;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e1e8ee;
+  background: #fbfcfd;
+  color: var(--ink);
+}
+
+.finance-action-list strong {
+  font-size: 18px;
+  color: var(--forest);
+}
+
+.finance-action-list span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.section-heading h4 {
+  margin: 0;
+  color: var(--ink);
+}
+
 .wide-panel {
   grid-column: 1 / -1;
 }

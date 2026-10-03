@@ -208,6 +208,24 @@ export class FinanceService {
 
   async recordPayment(actor: CurrentUser, body: unknown, syncDeviceId?: string | null) {
     const input = paymentSchema.parse(body);
+    if (input.id) {
+      const existing = await this.prisma.payment.findFirst({
+        where: { id: input.id, schoolId: actor.schoolId, deletedAt: null },
+        include: { receipt: true, invoice: { include: { student: true } } }
+      });
+      if (existing) {
+        if (existing.invoiceId !== input.invoiceId || money(existing.amount) !== input.amount) {
+          throw new ConflictException("Payment id already belongs to a different payment.");
+        }
+        return {
+          payment: existing,
+          receipt: existing.receipt,
+          previousBalance: money(existing.invoice.balance) + money(existing.amount),
+          remainingBalance: money(existing.invoice.balance),
+          student: existing.invoice.student
+        };
+      }
+    }
     const result = await this.withNumberRetry("receiptNo", async () => this.prisma.$transaction(async (tx) => {
       const invoice = await tx.studentInvoice.findFirst({ where: { id: input.invoiceId, schoolId: actor.schoolId, deletedAt: null }, include: { student: true } });
       if (!invoice) throw new NotFoundException("Invoice not found.");

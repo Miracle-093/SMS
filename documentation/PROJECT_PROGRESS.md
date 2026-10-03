@@ -1,6 +1,6 @@
 # Aethina SMS Project Progress
 
-Last updated: September 5, 2026
+Last updated: October 3, 2026
 
 ## Project Overview
 
@@ -10,7 +10,7 @@ Aethina SMS is now set up as a monorepo for Satelite Secondary School, a fiction
 
 - GitHub repository: `https://github.com/Miracle-093/SMS.git`
 - Local workspace: `C:\Users\DELL 7400\Desktop\Aethina SMS`
-- Current main branch includes the latest UI, deployment, documentation, seed, schema, and Phase 1 workflow work through commit `4595257faa0d9ac9c3ae61e02f2ec2d53338697d`.
+- Current main branch includes the latest UI, deployment, documentation, seed, schema, and Phase 1 workflow work through the teacher/class-teacher polish baseline and the October 3 bursar wrap-up pass for finance idempotency, cash-flow visibility, reminder queues, and final reporting updates.
 
 ## Live Applications
 
@@ -220,7 +220,9 @@ The UI has been improved across the admin shell and student portal:
 - DOS-only permissions now cover admissions, academic setup, subject allocation, class-teacher allocation, timetable management, and final report-card publishing.
 - Teachers are scoped to assigned classes/subjects for student visibility, timetable visibility, and marks entry.
 - Class teachers can prepare assigned report cards; DOS approval is required before publishing to the portal.
+- Class teachers now get a practical class portal context with assigned class/stream visibility, class list access, report preparation actions, staff announcements, and assigned-class timetable visibility.
 - The bursar dashboard is finance-only and hides academic, attendance, risk, inventory, and report-card widgets.
+- The bursar finance workspace now includes payment submit locking, idempotent payment replay protection, daily collections, recent payments, cash-flow summary, printable reminder queue, and richer expense record fields.
 - Mobile navigation added for the admin app.
 - Responsive layouts improved for phone and desktop screens.
 - Tables made scroll-safe on small screens.
@@ -298,12 +300,10 @@ The system is now a strong Phase 1 pilot, but it is not yet a finished commercia
 
 Recommended next build priorities:
 
-1. Complete full user and role management screens.
-2. Expand teacher and class-teacher workspace tools for class imports, class portal ownership, and controlled marks editing.
-3. Expand Bursar Workspace workflows for reminders, cash-flow views, and budget record keeping.
-4. Add richer DOS scope management for lower, middle, and upper school academic offices.
-5. Add file upload storage for student photos and documents.
-6. Add stronger dashboard charts and school leadership reports.
-7. Add audit-friendly approval detail screens.
-8. Add end-to-end browser tests as committed test scripts.
-9. Add production security hardening before using real school data.
+1. Add richer DOS scope management for lower, middle, and upper school academic offices.
+2. Add file upload storage for student photos and documents.
+3. Add stronger dashboard charts and school leadership reports.
+4. Add audit-friendly approval detail screens.
+5. Add end-to-end browser tests as committed test scripts.
+6. Add SMS/email delivery infrastructure for actual fee reminders.
+7. Add production security hardening before using real school data.

@@ -1847,6 +1847,8 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [invoiceStatus, setInvoiceStatus] = useState("");
   const [lastReceipt, setLastReceipt] = useState<{ receiptNo: string; student: string; amount: number; balance: number } | null>(null);
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [expenseSubmitting, setExpenseSubmitting] = useState(false);
   const [feeForm, setFeeForm] = useState({ classId: "", category: "Tuition", name: "", amount: "", dueDate: defaultFinanceDueDate(config), isMandatory: true });
   const [paymentForm, setPaymentForm] = useState({ invoiceId: "", amount: "", method: "CASH", reference: "", paidAt: new Date().toISOString().slice(0, 10), notes: "" });
   const [expenseForm, setExpenseForm] = useState({ category: "Stationery", department: "Administration", description: "", amount: "", method: "CASH", payee: "", reference: "", budgetId: "", spentAt: new Date().toISOString().slice(0, 10) });
@@ -1885,22 +1887,26 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
       setMessage("Choose a class, enter a fee name, and use an amount above zero.");
       return;
     }
-    await api("/finance/fee-structures", {
-      method: "POST",
-      body: JSON.stringify({
-        classId: feeForm.classId,
-        academicYearId: config?.school.currentAcademicYearId,
-        termId: config?.school.currentTermId,
-        category: feeForm.category,
-        name: feeForm.name,
-        amount,
-        dueDate: new Date(feeForm.dueDate).toISOString(),
-        isMandatory: feeForm.isMandatory,
-        isActive: true
-      })
-    });
-    setMessage("Fee structure created.");
-    await load();
+    try {
+      await api("/finance/fee-structures", {
+        method: "POST",
+        body: JSON.stringify({
+          classId: feeForm.classId,
+          academicYearId: config?.school.currentAcademicYearId,
+          termId: config?.school.currentTermId,
+          category: feeForm.category,
+          name: feeForm.name,
+          amount,
+          dueDate: new Date(feeForm.dueDate).toISOString(),
+          isMandatory: feeForm.isMandatory,
+          isActive: true
+        })
+      });
+      setMessage("Fee structure created.");
+      await load();
+    } catch (error) {
+      setMessage(userMessage(error, "Fee structure could not be created. Check for duplicates and try again."));
+    }
   }
 
   async function generateInvoices() {
@@ -1908,13 +1914,18 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
       setMessage("Choose a class and current term before generating invoices.");
       return;
     }
-    await api("/finance/invoices/generate", { method: "POST", body: JSON.stringify({ termId: config?.school.currentTermId, classId: feeForm.classId, dueDate: new Date(feeForm.dueDate).toISOString() }) });
-    setMessage("Invoices generated without duplicating existing invoices.");
-    await load();
+    try {
+      await api("/finance/invoices/generate", { method: "POST", body: JSON.stringify({ termId: config?.school.currentTermId, classId: feeForm.classId, dueDate: new Date(feeForm.dueDate).toISOString() }) });
+      setMessage("Invoices generated without duplicating existing invoices.");
+      await load();
+    } catch (error) {
+      setMessage(userMessage(error, "Invoices could not be generated. Confirm the term, class, and fee structures."));
+    }
   }
 
   async function recordPayment(event: React.FormEvent) {
     event.preventDefault();
+    if (paymentSubmitting) return;
     const amount = positiveNumber(paymentForm.amount);
     const invoice = invoices.find((item) => item.id === paymentForm.invoiceId);
     if (!invoice || amount === null) {
@@ -1926,6 +1937,7 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
       return;
     }
     const payload = {
+      id: crypto.randomUUID(),
       invoiceId: paymentForm.invoiceId,
       amount,
       method: paymentForm.method,
@@ -1935,6 +1947,7 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
       receivedBy: session.user.displayName,
       createdBy: session.user.id
     };
+    setPaymentSubmitting(true);
     try {
       if (!online) throw new Error("Offline");
       const result = await api("/finance/payments", { method: "POST", body: JSON.stringify(payload) });
@@ -1951,13 +1964,14 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
         setMessage(userMessage(error, "Payment could not be recorded. Please review the invoice, amount, and reference."));
         return;
       }
-      const id = crypto.randomUUID();
       const offlineReceiptNo = `OFF-${deviceId.slice(-4)}-${Date.now()}`;
-      await upsertLocalPayment({ id, ...payload, schoolId: session.user.schoolId, deviceId, receiptNo: offlineReceiptNo, syncStatus: "PENDING" });
-      await addPendingChange({ id: crypto.randomUUID(), entityType: SyncEntityType.Payment, entityId: id, operation: "CREATE", payload: { ...payload, receiptNo: offlineReceiptNo }, baseVersion: null, createdAt: new Date().toISOString(), retryCount: 0 }, session.user.schoolId, deviceId);
+      await upsertLocalPayment({ ...payload, schoolId: session.user.schoolId, deviceId, receiptNo: offlineReceiptNo, syncStatus: "PENDING" });
+      await addPendingChange({ id: crypto.randomUUID(), entityType: SyncEntityType.Payment, entityId: payload.id, operation: "CREATE", payload: { ...payload, receiptNo: offlineReceiptNo }, baseVersion: null, createdAt: new Date().toISOString(), retryCount: 0 }, session.user.schoolId, deviceId);
       setLastReceipt({ receiptNo: offlineReceiptNo, student: `${invoice.student.firstName} ${invoice.student.lastName}`, amount, balance: Number(invoice.balance) - amount });
       setPaymentForm((current) => ({ ...current, invoiceId: amount >= Number(invoice.balance) ? "" : current.invoiceId, amount: "", reference: "", notes: "" }));
       setMessage(`Payment saved offline with provisional receipt ${offlineReceiptNo}.`);
+    } finally {
+      setPaymentSubmitting(false);
     }
     await refreshOfflineState();
     await load().catch(() => undefined);
@@ -1965,12 +1979,14 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
 
   async function recordExpense(event: React.FormEvent) {
     event.preventDefault();
+    if (expenseSubmitting) return;
     const amount = positiveNumber(expenseForm.amount);
     if (!expenseForm.category.trim() || !expenseForm.description.trim() || amount === null) {
       setMessage("Enter an expense category, description, and amount above zero.");
       return;
     }
     const payload = { ...expenseForm, amount, spentAt: new Date(expenseForm.spentAt).toISOString(), budgetId: expenseForm.budgetId || null, requestedBy: session.user.id, createdBy: session.user.id };
+    setExpenseSubmitting(true);
     try {
       if (!online) throw new Error("Offline");
       await api("/finance/expenses", { method: "POST", body: JSON.stringify(payload) });
@@ -1986,6 +2002,8 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
       await addPendingChange({ id: crypto.randomUUID(), entityType: SyncEntityType.Expense, entityId: id, operation: "CREATE", payload, baseVersion: null, createdAt: new Date().toISOString(), retryCount: 0 }, session.user.schoolId, deviceId);
       setExpenseForm((current) => ({ ...current, description: "", amount: "", payee: "", reference: "" }));
       setMessage("Expense saved offline and queued for synchronization.");
+    } finally {
+      setExpenseSubmitting(false);
     }
     await refreshOfflineState();
     await load().catch(() => undefined);
@@ -1996,9 +2014,13 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
       setMessage("This payment does not have a synchronized receipt yet.");
       return;
     }
-    await api(`/finance/receipts/${receiptId}/reprint`, { method: "POST", body: JSON.stringify({}) });
-    setMessage("Receipt marked for reprint. Use Print Receipts for the browser print copy.");
-    await load();
+    try {
+      await api(`/finance/receipts/${receiptId}/reprint`, { method: "POST", body: JSON.stringify({}) });
+      setMessage("Receipt marked for reprint. Use Print Receipts for the browser print copy.");
+      await load();
+    } catch (error) {
+      setMessage(userMessage(error, "Receipt could not be marked for reprint."));
+    }
   }
 
   async function requestPaymentReversal(paymentId: string, existingStatus: string) {
@@ -2016,9 +2038,13 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
       setMessage("Reversal reason must be at least 10 characters.");
       return;
     }
-    await api("/finance/reversals", { method: "POST", body: JSON.stringify({ paymentId, reason: reason.trim() }) });
-    setMessage("Payment reversal request submitted for approval.");
-    await load();
+    try {
+      await api("/finance/reversals", { method: "POST", body: JSON.stringify({ paymentId, reason: reason.trim() }) });
+      setMessage("Payment reversal request submitted for approval.");
+      await load();
+    } catch (error) {
+      setMessage(userMessage(error, "Payment reversal request could not be submitted."));
+    }
   }
 
   const selectedPaymentInvoice = invoices.find((invoice) => invoice.id === paymentForm.invoiceId);
@@ -2029,6 +2055,16 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
   });
   const overdueInvoices = invoices.filter((invoice) => Number(invoice.balance) > 0 && invoice.dueDate && new Date(invoice.dueDate) < new Date());
   const partialInvoices = invoices.filter((invoice) => Number(invoice.amountPaid) > 0 && Number(invoice.balance) > 0);
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const allPayments = invoices.flatMap((invoice) => (invoice.payments ?? []).map((payment) => ({ invoice, payment })));
+  const collectedToday = allPayments
+    .filter(({ payment }) => new Date(payment.paidAt).toISOString().slice(0, 10) === todayKey)
+    .reduce((sum, { payment }) => sum + Number(payment.amount), 0);
+  const recentPayments = [...allPayments].sort((left, right) => new Date(right.payment.paidAt).getTime() - new Date(left.payment.paidAt).getTime()).slice(0, 6);
+  const reminderQueue = [...overdueInvoices].sort((left, right) => Number(right.balance) - Number(left.balance)).slice(0, 8);
+  const approvedExpenses = expenses.filter((expense) => financeLabel(expense.approvalStatus).toLowerCase() === "approved");
+  const pendingExpenses = expenses.filter((expense) => financeLabel(expense.approvalStatus).toLowerCase() === "pending");
+  const approvedExpenseTotal = approvedExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
   const paymentRows = invoices.flatMap((invoice) => (invoice.payments ?? []).map((payment) => {
     const reversalStatus = paymentReversalStatus(payment.reversals);
     const receiptId = payment.receipt?.id;
@@ -2054,9 +2090,10 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
     financeLabel(expense.approvalStatus)
   ]);
   const canCreateFee = Boolean(feeForm.classId && feeForm.name.trim() && positiveNumber(feeForm.amount));
-  const canRecordPayment = Boolean(selectedPaymentInvoice && positiveNumber(paymentForm.amount) && Number(paymentForm.amount) <= Number(selectedPaymentInvoice.balance));
-  const canRecordExpense = Boolean(expenseForm.category.trim() && expenseForm.description.trim() && positiveNumber(expenseForm.amount));
+  const canRecordPayment = Boolean(!paymentSubmitting && selectedPaymentInvoice && positiveNumber(paymentForm.amount) && Number(paymentForm.amount) <= Number(selectedPaymentInvoice.balance));
+  const canRecordExpense = Boolean(!expenseSubmitting && expenseForm.category.trim() && expenseForm.description.trim() && positiveNumber(expenseForm.amount));
   const financeHealth = overview ? [
+    { label: "Collected today", value: ugx(collectedToday), tone: "good" },
     { label: "Collection rate", value: `${overview.collectionPercentage ?? 0}%`, tone: Number(overview.collectionPercentage ?? 0) >= 80 ? "good" : "watch" },
     { label: "Overdue invoices", value: String(overdueInvoices.length), tone: overdueInvoices.length ? "watch" : "good" },
     { label: "Offline queue", value: String(localPayments.length + localExpenses.length), tone: localPayments.length + localExpenses.length ? "watch" : "good" }
@@ -2086,15 +2123,43 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
       <div className="tabs wide-panel">
         {["overview", "fees", "invoices", "payments", "expenses", "reports"].map((item) => <button key={item} className={tab === item ? "active" : "ghost"} type="button" onClick={() => setTab(item as typeof tab)}>{formatEntityName(item)}</button>)}
       </div>
-      {tab === "overview" && <section className="metric-grid wide-panel">
+      {tab === "overview" && <>
+      <section className="metric-grid wide-panel">
         <div className="section-heading print-span"><h3>Essential Financial Summary</h3><button type="button" className="ghost no-print" onClick={printPage}>Print</button></div>
         <div className="metric"><span>Expected</span><strong>{ugx(overview?.expectedFees)}</strong></div>
         <div className="metric"><span>Collected</span><strong>{ugx(overview?.collectedFees)}</strong></div>
+        <div className="metric"><span>Collected today</span><strong>{ugx(collectedToday)}</strong></div>
         <div className="metric"><span>Outstanding</span><strong>{ugx(overview?.outstandingFees)}</strong></div>
         <div className="metric"><span>Collection</span><strong>{overview?.collectionPercentage ?? 0}%</strong></div>
         <div className="metric"><span>Discounts</span><strong>{ugx(overview?.discounts)}</strong></div>
         <div className="metric"><span>Expenses</span><strong>{ugx(overview?.expenses)}</strong></div>
-      </section>}
+        <div className="metric"><span>Net cash movement</span><strong>{ugx(overview?.netCashMovement)}</strong></div>
+      </section>
+      <section className="finance-ops-grid wide-panel">
+        <article className="operation-panel">
+          <div className="section-heading"><h3>Bursar Priority Queue</h3><button type="button" className="ghost" onClick={() => setTab("payments")}>Record Payment</button></div>
+          <div className="finance-action-list">
+            <button type="button" onClick={() => setTab("invoices")}><strong>{overdueInvoices.length}</strong><span>overdue invoices need reminder follow-up.</span></button>
+            <button type="button" onClick={() => setTab("payments")}><strong>{partialInvoices.length}</strong><span>part-paid accounts are still carrying balances.</span></button>
+            <button type="button" onClick={() => setTab("expenses")}><strong>{pendingExpenses.length}</strong><span>expense records are awaiting approval or review.</span></button>
+            <button type="button" onClick={() => setTab("reports")}><strong>{ugx(Math.max((overview?.collectedFees ?? 0) - approvedExpenseTotal, 0))}</strong><span>current approved cash surplus after expenses.</span></button>
+          </div>
+        </article>
+        <article className="operation-panel">
+          <div className="section-heading"><h3>Recent Payments</h3><button type="button" className="ghost" onClick={() => setTab("payments")}>Open</button></div>
+          <FinanceTable
+            compact
+            headings={["Receipt", "Student", "Amount", "Paid"]}
+            rows={recentPayments.map(({ invoice, payment }) => [
+              payment.receipt?.receiptNo ?? payment.receiptNo ?? "Pending receipt",
+              `${invoice.student.firstName} ${invoice.student.lastName}`,
+              ugx(payment.amount),
+              dateOnly(payment.paidAt)
+            ])}
+          />
+        </article>
+      </section>
+      </>}
       {tab === "fees" && <section className="operation-panel wide-panel">
         <div className="section-heading"><h3>Fee Structures</h3><button type="button" onClick={generateInvoices} disabled={!feeForm.classId}>Generate Invoices</button></div>
         <form className="inline-form" onSubmit={(event) => void createFee(event)}>
@@ -2134,10 +2199,10 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
           <label>Method<select value={paymentForm.method} onChange={(event) => setPaymentForm({ ...paymentForm, method: event.target.value })}>{["CASH", "MOBILE_MONEY", "BANK_TRANSFER", "BANK_DEPOSIT", "CHEQUE", "ONLINE_PAYMENT", "OTHER"].map((method) => <option key={method} value={method}>{financeLabel(method)}</option>)}</select></label>
           <label>Reference<input placeholder="Receipt, cheque, bank or mobile money ref" value={paymentForm.reference} onChange={(event) => setPaymentForm({ ...paymentForm, reference: event.target.value })} /></label>
           <label>Date received<input type="date" value={paymentForm.paidAt} onChange={(event) => setPaymentForm({ ...paymentForm, paidAt: event.target.value })} /></label>
-          <button type="button" className="ghost" disabled={!selectedPaymentInvoice} onClick={() => setPaymentForm({ ...paymentForm, amount: selectedBalance ? String(selectedBalance) : "" })}>Full Balance</button>
-          <button type="submit" disabled={!canRecordPayment}>Record</button>
+          <button type="button" className="ghost" disabled={!selectedPaymentInvoice || paymentSubmitting} onClick={() => setPaymentForm({ ...paymentForm, amount: selectedBalance ? String(selectedBalance) : "" })}>Full Balance</button>
+          <button type="submit" disabled={!canRecordPayment}>{paymentSubmitting ? "Recording..." : "Record"}</button>
         </form>
-        {lastReceipt && <div className="receipt-result"><strong>{lastReceipt.receiptNo}</strong><span>{lastReceipt.student} paid {ugx(lastReceipt.amount)}. Remaining balance: {ugx(lastReceipt.balance)}.</span></div>}
+        {lastReceipt && <div className="receipt-result"><strong>{lastReceipt.receiptNo}</strong><span>{lastReceipt.student} paid {ugx(lastReceipt.amount)}. Remaining balance: {ugx(lastReceipt.balance)}.</span><button type="button" className="ghost no-print" onClick={printPage}>Print Receipt</button></div>}
         <FinanceTable rows={paymentRows} headings={["Receipt", "Invoice", "Student", "Amount", "Method", "Paid", "Reversal", "Actions"]} />
       </section>}
       {tab === "expenses" && <section className="operation-panel wide-panel">
@@ -2148,12 +2213,34 @@ function FinanceView({ api, config, students, session, online, refreshOfflineSta
           <label>Description<input placeholder="What was paid for?" value={expenseForm.description} onChange={(event) => setExpenseForm({ ...expenseForm, description: event.target.value })} required /></label>
           <label>Amount<input type="number" min="1" step="1" placeholder="UGX amount" value={expenseForm.amount} onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })} required /></label>
           <label>Budget<select value={expenseForm.budgetId} onChange={(event) => setExpenseForm({ ...expenseForm, budgetId: event.target.value })}><option value="">No budget linked</option>{budgets.map((budget) => <option key={budget.id} value={budget.id}>{budget.name} - {budget.department} ({ugx(Number(budget.amount) - Number(budget.spentAmount))} left)</option>)}</select></label>
+          <label>Method<select value={expenseForm.method} onChange={(event) => setExpenseForm({ ...expenseForm, method: event.target.value })}>{["CASH", "MOBILE_MONEY", "BANK_TRANSFER", "BANK_DEPOSIT", "CHEQUE", "ONLINE_PAYMENT", "OTHER"].map((method) => <option key={method} value={method}>{financeLabel(method)}</option>)}</select></label>
+          <label>Reference<input placeholder="Voucher, receipt, bank or mobile money ref" value={expenseForm.reference} onChange={(event) => setExpenseForm({ ...expenseForm, reference: event.target.value })} /></label>
+          <label>Date spent<input type="date" value={expenseForm.spentAt} onChange={(event) => setExpenseForm({ ...expenseForm, spentAt: event.target.value })} /></label>
           <label>Payee<input placeholder="Supplier or staff member" value={expenseForm.payee} onChange={(event) => setExpenseForm({ ...expenseForm, payee: event.target.value })} /></label>
-          <button type="submit" disabled={!canRecordExpense}>Record</button>
+          <button type="submit" disabled={!canRecordExpense}>{expenseSubmitting ? "Recording..." : "Record"}</button>
         </form>
         <FinanceTable rows={expenseRows} headings={["No.", "Category", "Department", "Amount", "Status"]} />
       </section>}
-      {tab === "reports" && <section className="operation-panel wide-panel"><div className="section-heading"><h3>Initial Reports</h3><button type="button" className="ghost no-print" onClick={printPage}>Print Summary</button></div><FinanceTable rows={filteredInvoices.map((invoice) => [invoice.student.admissionNo, `${invoice.student.firstName} ${invoice.student.lastName}`, ugx(invoice.amount), ugx(invoice.amountPaid), ugx(invoice.balance), financeLabel(invoice.status)])} headings={["Admission", "Student", "Expected", "Paid", "Balance", "Status"]} /></section>}
+      {tab === "reports" && <section className="operation-panel wide-panel">
+        <div className="section-heading"><h3>Finance Reports</h3><button type="button" className="ghost no-print" onClick={printPage}>Print Summary</button></div>
+        <div className="finance-report-grid">
+          <div className="metric"><span>Approved expenses</span><strong>{ugx(approvedExpenseTotal)}</strong></div>
+          <div className="metric"><span>Pending expenses</span><strong>{String(pendingExpenses.length)}</strong></div>
+          <div className="metric"><span>Reminder queue</span><strong>{String(reminderQueue.length)}</strong></div>
+          <div className="metric"><span>Offline finance queue</span><strong>{String(localPayments.length + localExpenses.length)}</strong></div>
+        </div>
+        <div className="section-heading"><h4>Fee Statement</h4><span className="pill">{filteredInvoices.length} invoices</span></div>
+        <FinanceTable rows={filteredInvoices.map((invoice) => [invoice.student.admissionNo, `${invoice.student.firstName} ${invoice.student.lastName}`, ugx(invoice.amount), ugx(invoice.amountPaid), ugx(invoice.balance), financeLabel(invoice.status)])} headings={["Admission", "Student", "Expected", "Paid", "Balance", "Status"]} />
+        <div className="section-heading"><h4>Reminder Queue</h4><span className="pill">{reminderQueue.length} priority accounts</span></div>
+        <FinanceTable rows={reminderQueue.map((invoice) => [
+          invoice.student.admissionNo,
+          `${invoice.student.firstName} ${invoice.student.lastName}`,
+          invoice.student.currentClass?.name ?? "Class not assigned",
+          dateOnly(invoice.dueDate),
+          ugx(invoice.balance),
+          "Send fee reminder / follow up"
+        ])} headings={["Admission", "Student", "Class", "Due", "Balance", "Next action"]} />
+      </section>}
     </section>
   );
 }
@@ -3199,8 +3286,8 @@ function InvoiceTable({ invoices }: { invoices: InvoiceRecord[] }) {
   return <DataTable label="Student invoices"><thead><tr><th>Invoice</th><th>Student</th><th>Due</th><th>Expected</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td>{invoice.invoiceNo}</td><td>{invoice.student.admissionNo}<br /><small>{invoice.student.firstName} {invoice.student.lastName}</small></td><td>{dateOnly(invoice.dueDate)}</td><td>{ugx(invoice.amount)}</td><td>{ugx(invoice.amountPaid)}</td><td>{ugx(invoice.balance)}</td><td><span className={financeStatusClass(invoice.status)}>{financeLabel(invoice.status)}</span></td></tr>)}{invoices.length === 0 && <tr><td colSpan={7} className="empty">No invoices match this view.</td></tr>}</tbody></DataTable>;
 }
 
-function FinanceTable({ headings, rows }: { headings: string[]; rows: Array<Array<React.ReactNode>> }) {
-  return <DataTable label={headings.join(", ")}><thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="empty">No records to display.</td></tr>}</tbody></DataTable>;
+function FinanceTable({ headings, rows, compact = false }: { headings: string[]; rows: Array<Array<React.ReactNode>>; compact?: boolean }) {
+  return <DataTable label={headings.join(", ")} compact={compact}><thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="empty">No records to display.</td></tr>}</tbody></DataTable>;
 }
 
 function readJson<T>(key: string, fallback: T): T {

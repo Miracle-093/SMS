@@ -75,6 +75,38 @@ describe("tenant and referential integrity regressions", () => {
     expect(tx.feeAdjustment.create).not.toHaveBeenCalled();
   });
 
+  it("treats repeated payment ids as idempotent replays before writing again", async () => {
+    const paymentId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const prisma = {
+      payment: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: paymentId,
+          schoolId,
+          invoiceId,
+          amount: 1000,
+          receipt: { id: "ffffffff-ffff-4fff-8fff-ffffffffffff", receiptNo: "RCT-2026-00001" },
+          invoice: { id: invoiceId, balance: 24000, student: { id: studentId, firstName: "Demo", lastName: "Student" } }
+        })
+      },
+      $transaction: vi.fn()
+    };
+    const audit = { record: vi.fn() };
+    const service = new FinanceService(prisma as never, audit as never);
+
+    const result = await service.recordPayment(actor, {
+      id: paymentId,
+      invoiceId,
+      amount: 1000,
+      method: "CASH",
+      paidAt: "2026-09-01T00:00:00.000Z"
+    });
+
+    expect(result.receipt?.receiptNo).toBe("RCT-2026-00001");
+    expect(result.remainingBalance).toBe(24000);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
   it("rejects a second reversal request after a payment has already been reversed", async () => {
     const prisma = {
       payment: { findFirst: vi.fn().mockResolvedValue({ id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", schoolId }) },

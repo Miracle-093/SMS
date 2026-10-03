@@ -4,10 +4,10 @@ Release target: Aethina SMS Phase One - Client Acceptance and Pilot Release.
 
 ## Version
 
-- Release date: 2026-09-05
+- Release date: 2026-10-03
 - Git branch: `main`
-- Git commit SHA at packaging checkpoint: `4595257faa0d9ac9c3ae61e02f2ec2d53338697d`
-- Acceptance evidence: `output/acceptance/phase1-acceptance-2026-09-04T23-44-07-497Z.md`
+- Git commit SHA at packaging checkpoint: use the latest `main` commit recorded in the handoff or `git log` after packaging.
+- Acceptance evidence: `output/acceptance/phase1-acceptance-2026-09-06T09-21-29-930Z.md`
 - Client report PDF: `output/pdf/aethina-phase-one-client-acceptance-report.pdf`
 
 ## URLs
@@ -48,6 +48,9 @@ Additional release-preparation checks:
 - Hosted read-only checks: API `/health` returned `status=ok` and `database=ok`; hosted admin and portal returned HTTP 200
 - Frontend/UI polish implementation: desktop role persona precedence, first-launch window width, kiosk failure copy, aria-live notices, keyboard student row selection, portal semantic output tables, portal print identity headers, portal retry states for timetable/announcements/notifications, and service-worker asset runtime caching
 - Desktop installer rebuild after UI polish: MSI and NSIS generated successfully on 2026-08-27
+- Teacher/class-teacher workspace polish: class portal context, assigned class timetable visibility, read-only staff announcements, scoped report preparation, and protected finalized marks.
+- Bursar workspace wrap-up: payment submit locking, backend idempotent payment replay handling, daily collections, cash-flow visibility, expense method/reference/date capture, reminder queue, and stronger finance reports.
+- October 3 local checks: `npm.cmd run build`, `npm.cmd run build:vercel:api`, desktop workspace build, and focused API tenant-integrity regression test passed. Full DB-backed test, offline smoke, and acceptance runs were blocked locally because PostgreSQL at `localhost:5432` and Docker Desktop were unavailable.
 
 Re-run all commands after any release change and update this section with timestamps.
 
