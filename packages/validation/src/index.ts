@@ -451,14 +451,32 @@ export const notificationTemplateSchema = z.object({
   isActive: z.boolean().default(true)
 });
 
+const schoolWideAnnouncementAudience = z.enum(["ALL", "PORTAL", "STUDENTS", "GUARDIANS"]);
+
 export const announcementSchema = z.object({
   title: z.string().min(2).max(160),
   message: z.string().min(2).max(3000),
-  audience: z.string().min(2).max(80),
+  audience: z.union([schoolWideAnnouncementAudience, z.literal("CLASS"), z.literal("STREAM")]),
   classId: z.string().uuid().nullable().optional(),
   streamId: z.string().uuid().nullable().optional(),
   academicYearId: z.string().uuid().nullable().optional(),
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
   publishAt: z.string().datetime(),
   expiresAt: z.string().datetime().nullable().optional()
+}).superRefine((value, context) => {
+  if (schoolWideAnnouncementAudience.safeParse(value.audience).success) {
+    if (value.classId || value.streamId) {
+      context.addIssue({ code: "custom", message: "School-wide announcements cannot target a class or stream.", path: ["audience"] });
+    }
+    return;
+  }
+  if (!value.classId) {
+    context.addIssue({ code: "custom", message: "Class and stream announcements require a class.", path: ["classId"] });
+  }
+  if (value.audience === "CLASS" && value.streamId) {
+    context.addIssue({ code: "custom", message: "Class announcements cannot target a stream.", path: ["streamId"] });
+  }
+  if (value.audience === "STREAM" && !value.streamId) {
+    context.addIssue({ code: "custom", message: "Stream announcements require a stream.", path: ["streamId"] });
+  }
 });

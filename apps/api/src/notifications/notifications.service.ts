@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { SyncStatus, type CurrentUser } from "@aethina/shared-types";
 import { announcementSchema, notificationTemplateSchema } from "@aethina/validation";
 import { Prisma } from "@prisma/client";
@@ -88,6 +88,18 @@ export class NotificationsService {
 
   async createAnnouncement(actor: CurrentUser, body: unknown) {
     const input = announcementSchema.parse(body);
+    if (input.classId) {
+      const schoolClass = await this.prisma.class.findFirst({ where: { id: input.classId, schoolId: actor.schoolId } });
+      if (!schoolClass) throw new BadRequestException("Announcement class must belong to this school.");
+    }
+    if (input.streamId) {
+      const stream = await this.prisma.stream.findFirst({ where: { id: input.streamId, schoolId: actor.schoolId, classId: input.classId ?? undefined } });
+      if (!stream) throw new BadRequestException("Announcement stream must belong to the selected class in this school.");
+    }
+    if (input.academicYearId) {
+      const academicYear = await this.prisma.academicYear.findFirst({ where: { id: input.academicYearId, schoolId: actor.schoolId } });
+      if (!academicYear) throw new BadRequestException("Announcement academic year must belong to this school.");
+    }
     const announcement = await this.prisma.announcement.create({
       data: { schoolId: actor.schoolId, createdBy: actor.id, ...input, classId: input.classId ?? null, streamId: input.streamId ?? null, academicYearId: input.academicYearId ?? null, publishAt: new Date(input.publishAt), expiresAt: input.expiresAt ? new Date(input.expiresAt) : null }
     });

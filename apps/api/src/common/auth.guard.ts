@@ -18,7 +18,7 @@ export class AuthGuard implements CanActivate {
       return false;
     }
     const tokenUser = this.tokenService.verify(token);
-    request.user = tokenUser.roles.includes("PORTAL_USER") ? tokenUser : await this.currentStaffUser(tokenUser);
+    request.user = tokenUser.roles.includes("PORTAL_USER") ? await this.currentPortalUser(tokenUser) : await this.currentStaffUser(tokenUser);
     return true;
   }
 
@@ -46,6 +46,38 @@ export class AuthGuard implements CanActivate {
       roles: user.roles.map((item) => item.role.name),
       permissions: Array.from(new Set(user.roles.flatMap((item) => item.role.permissions.map((permission) => permission.permission.key)))),
       mustChangePassword: user.mustChangePassword
+    };
+  }
+
+  private async currentPortalUser(tokenUser: CurrentUser): Promise<CurrentUser> {
+    const credential = await this.prisma.studentPortalCredential.findFirst({
+      where: {
+        studentId: tokenUser.id,
+        isActive: true,
+        student: {
+          schoolId: tokenUser.schoolId,
+          deletedAt: null,
+          status: "ACTIVE",
+          school: { isActive: true }
+        }
+      },
+      select: {
+        username: true,
+        mustReset: true,
+        student: { select: { id: true, schoolId: true, firstName: true, lastName: true } }
+      }
+    });
+    if (!credential) {
+      throw new UnauthorizedException("Your portal access is no longer available. Please sign in again.");
+    }
+    return {
+      id: credential.student.id,
+      schoolId: credential.student.schoolId,
+      email: credential.username,
+      displayName: `${credential.student.firstName} ${credential.student.lastName}`,
+      roles: ["PORTAL_USER"],
+      permissions: [],
+      mustChangePassword: credential.mustReset
     };
   }
 }

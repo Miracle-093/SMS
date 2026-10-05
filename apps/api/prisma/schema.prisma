@@ -69,6 +69,7 @@ model School {
   id        String   @id @default(uuid())
   name      String
   code      String   @unique
+  isActive  Boolean  @default(true)
   phone     String?
   email     String?
   address   String?

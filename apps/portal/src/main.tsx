@@ -90,6 +90,10 @@ function PortalApp() {
       if (view === "notifications") setNotifications(await api<any[]>("/portal/notifications", token));
     } catch (err) {
       const issue = readableError(err);
+      if (isPortalAccessError(err)) {
+        expireSession(issue);
+        return;
+      }
       setError(issue);
       const loadableView = loadableViews.includes(view as LoadableView) ? view as LoadableView : null;
       if (loadableView) setViewErrors((current) => ({ ...current, [loadableView]: issue }));
@@ -104,6 +108,15 @@ function PortalApp() {
     setHome(null);
     setViewErrors({});
     setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  }
+
+  function expireSession(issue: PortalIssue) {
+    localStorage.removeItem("aethina.portal.session");
+    setSession(null);
+    setHome(null);
+    setViewErrors({});
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    setError(issue);
   }
 
   async function changePassword(event: React.FormEvent) {
@@ -123,7 +136,9 @@ function PortalApp() {
       setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
       void refresh(nextSession.accessToken, "home");
     } catch (err) {
-      setError(readableError(err));
+      const issue = readableError(err);
+      if (isPortalAccessError(err)) expireSession(issue);
+      else setError(issue);
     } finally {
       setLoading(false);
     }
@@ -140,8 +155,11 @@ function PortalApp() {
       await api(`/portal/notifications/${id}/read`, session.accessToken, { method: "POST" });
     } catch (err) {
       const issue = readableError(err);
-      setViewErrors((current) => ({ ...current, notifications: issue }));
-      void refresh(session.accessToken, "notifications");
+      if (isPortalAccessError(err)) expireSession(issue);
+      else {
+        setViewErrors((current) => ({ ...current, notifications: issue }));
+        void refresh(session.accessToken, "notifications");
+      }
     }
   }
 
@@ -490,7 +508,7 @@ function FeedView({ title, rows, kind, compact, onMarkRead }: { title: string; r
             </div>
             <strong>{row.title}</strong>
             <p>{row.message ?? row.body}</p>
-            {kind === "notifications" && !row.readAt && onMarkRead && <button type="button" className="ghost mark-read" onClick={() => onMarkRead(row.id)}>Mark as read</button>}
+            {kind === "notifications" && row.canMarkRead !== false && !row.readAt && onMarkRead && <button type="button" className="ghost mark-read" onClick={() => onMarkRead(row.id)}>Mark as read</button>}
           </article>
         ))}
       </div>
@@ -557,11 +575,15 @@ async function api<T>(path: string, token: string | null, options?: { method?: s
     throw new PortalApiError("Cannot reach the school server. Check that the PC server is running and that your phone is on the same Wi-Fi.", String(error));
   }
   if (!response.ok) {
-    const text = await response.text();
+    await response.text();
     console.error("Portal API error", response.status);
+    const protectedPortalRequest = path.startsWith("/portal/");
+    if (protectedPortalRequest && [401, 403].includes(response.status)) {
+      throw new PortalApiError("Your portal session has expired or access is no longer available. Please sign in again.", undefined, true);
+    }
     throw new PortalApiError(
       response.status === 401 ? "Check your username and password." : "Something went wrong while loading this information.",
-      `Status ${response.status}: ${text}`
+      response.status >= 500 ? `Status ${response.status}` : undefined
     );
   }
   return response.json();
@@ -569,11 +591,13 @@ async function api<T>(path: string, token: string | null, options?: { method?: s
 
 class PortalApiError extends Error {
   details?: string;
+  accessError: boolean;
 
-  constructor(message: string, details?: string) {
+  constructor(message: string, details?: string, accessError = false) {
     super(message);
     this.name = "PortalApiError";
     this.details = details;
+    this.accessError = accessError;
   }
 }
 
@@ -658,6 +682,10 @@ function readableError(error: unknown): PortalIssue {
   if (error instanceof PortalApiError) return { message: error.message, details: error.details };
   if (error instanceof Error) return { message: "Something went wrong. Please try again.", details: error.message };
   return { message: "Something went wrong. Please try again." };
+}
+
+function isPortalAccessError(error: unknown) {
+  return error instanceof PortalApiError && error.accessError;
 }
 
 function readJson<T>(key: string, fallback: T): T {

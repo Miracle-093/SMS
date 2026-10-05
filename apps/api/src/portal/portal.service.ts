@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { passwordChangeSchema } from "@aethina/validation";
 import type { CurrentUser } from "@aethina/shared-types";
+import type { Prisma } from "@prisma/client";
 import { AuditService } from "../audit/audit.service.js";
 import { PasswordService } from "../auth/password.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -71,19 +72,22 @@ export class PortalService {
   async announcements(user: CurrentUser) {
     const student = await this.student(user);
     const now = new Date();
+    const targets: Prisma.AnnouncementWhereInput[] = [
+      { audience: { in: ["ALL", "PORTAL", "STUDENTS", "GUARDIANS"] }, classId: null, streamId: null }
+    ];
+    if (student.currentClassId) {
+      targets.push({ audience: "CLASS", classId: student.currentClassId, streamId: null });
+    }
+    if (student.currentClassId && student.currentStreamId) {
+      targets.push({ audience: "STREAM", classId: student.currentClassId, streamId: student.currentStreamId });
+    }
     return this.prisma.announcement.findMany({
       where: {
         schoolId: user.schoolId,
         deletedAt: null,
         publishAt: { lte: now },
         OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
-        AND: [{
-          OR: [
-            { audience: { in: ["ALL", "PORTAL", "STUDENTS", "GUARDIANS"] } },
-            { classId: student.currentClassId },
-            { streamId: student.currentStreamId }
-          ]
-        }]
+        AND: [{ OR: targets }]
       },
       orderBy: [{ priority: "desc" }, { publishAt: "desc" }],
       take: 50
@@ -95,15 +99,23 @@ export class PortalService {
       where: {
         schoolId: user.schoolId,
         deletedAt: null,
-        OR: [{ recipientId: user.id }, { recipientType: { in: ["ALL", "PORTAL", "STUDENT"] } }]
+        OR: [
+          { recipientType: { in: ["ALL", "PORTAL", "STUDENT", "STUDENTS", "GUARDIANS"] }, recipientId: null },
+          { recipientType: "STUDENT", recipientId: user.id }
+        ]
       },
       orderBy: { createdAt: "desc" },
       take: 50
-    });
+    }).then((notifications) => notifications.map((notification) => ({
+      ...notification,
+      canMarkRead: notification.recipientType === "STUDENT" && notification.recipientId === user.id
+    })));
   }
 
   async markNotificationRead(user: CurrentUser, id: string) {
-    const notification = await this.prisma.notification.findFirst({ where: { id, schoolId: user.schoolId, OR: [{ recipientId: user.id }, { recipientType: { in: ["ALL", "PORTAL", "STUDENT"] } }] } });
+    const notification = await this.prisma.notification.findFirst({
+      where: { id, schoolId: user.schoolId, recipientType: "STUDENT", recipientId: user.id, deletedAt: null }
+    });
     if (!notification) throw new NotFoundException("Notification not found.");
     return this.prisma.notification.update({ where: { id }, data: { readAt: new Date() } });
   }
