@@ -742,7 +742,7 @@ function App() {
         ) : activeView === "school" ? (
           <SchoolConfigView config={config} scope={workspaceScope} api={api} refreshAll={refreshAll} setMessage={showMessage} />
         ) : activeView === "attendance" ? (
-          <AttendanceView api={api} setMessage={showMessage} />
+          <AttendanceView api={api} setMessage={showMessage} canReview={session.user.permissions.includes(PermissionKey.AttendanceManage) && session.user.permissions.includes(PermissionKey.ApprovalReview)} />
         ) : activeView === "sync" ? (
           <SyncReviewView api={api} setMessage={showMessage} />
         ) : activeView === "audit" ? (
@@ -1322,7 +1322,7 @@ function SchoolConfigView({ config, scope, api, refreshAll, setMessage }: { conf
   );
 }
 
-function AttendanceView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
+function AttendanceView({ api, setMessage, canReview }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void; canReview: boolean }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [corrections, setCorrections] = useState<AttendanceRecord[]>([]);
@@ -1330,7 +1330,7 @@ function AttendanceView({ api, setMessage }: { api: (path: string, init?: Reques
   async function load() {
     const [dayRows, pendingRows] = await Promise.all([
       api(`/teacher-attendance?date=${encodeURIComponent(date)}`),
-      api("/teacher-attendance/correction-requests")
+      canReview ? api("/teacher-attendance/correction-requests") : Promise.resolve([])
     ]);
     setRecords(asArray<AttendanceRecord>(dayRows));
     setCorrections(asArray<AttendanceRecord>(pendingRows));
@@ -1359,7 +1359,7 @@ function AttendanceView({ api, setMessage }: { api: (path: string, init?: Reques
         </div>
         <AttendanceTable records={records} />
       </section>
-      <section className="operation-panel wide-panel">
+      {canReview && <section className="operation-panel wide-panel">
         <div className="section-heading"><h3>Correction Requests</h3><span className="pill">{corrections.length} pending</span></div>
         <DataTable label="Teacher attendance correction requests">
           <thead><tr><th>Teacher</th><th>Reason</th><th>Requested</th><th>Decision</th></tr></thead>
@@ -1378,7 +1378,7 @@ function AttendanceView({ api, setMessage }: { api: (path: string, init?: Reques
             {corrections.length === 0 && <tr><td colSpan={4} className="empty">No correction requests waiting for review.</td></tr>}
           </tbody>
         </DataTable>
-      </section>
+      </section>}
     </section>
   );
 }

@@ -312,11 +312,13 @@ describe("tenant and referential integrity regressions", () => {
       teacherAttendance: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "attendance-1", teacherId: teacherId, deletedAt: null }),
         update
-      }
-    } as never, {} as never, {} as never);
+      },
+      teacher: { findUnique: vi.fn().mockResolvedValue({ id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }) }
+    } as never, { verify: vi.fn().mockReturnValue(true) } as never, {} as never);
 
     await expect(service.requestCorrection("attendance-1", {
-      requestedBy: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      staffId: "TCH-OTHER",
+      pin: "1234",
       reason: "The attendance correction belongs to another teacher."
     })).rejects.toBeInstanceOf(BadRequestException);
 

@@ -16,6 +16,7 @@ describe("Phase 1 core integration", () => {
   let dosToken: string;
   let bursarToken: string;
   let classTeacherToken: string;
+  let attendanceReviewerToken: string;
   let schoolId: string;
   let classOneId: string;
   let classTwoId: string;
@@ -37,6 +38,19 @@ describe("Phase 1 core integration", () => {
     bursarToken = bursarLogin.accessToken;
     const classTeacherLogin = await post("/auth/login", { email: "grace.otieno@aethina.test", password: "TeacherPass123", deviceId: "00000000-0000-4000-8000-000000000001" });
     classTeacherToken = classTeacherLogin.accessToken;
+
+    const roles = await authGet("/users/roles");
+    const headTeacherRole = roles.find((role: { name: string }) => role.name === "Head Teacher");
+    expect(headTeacherRole).toBeTruthy();
+    const attendanceReviewerPassword = `AeAttendance${Date.now()}!`;
+    const attendanceReviewer = await authPost("/users", {
+      displayName: "Integration Attendance Reviewer",
+      email: `attendance-reviewer-${Date.now()}@example.test`,
+      temporaryPassword: attendanceReviewerPassword,
+      roleIds: [headTeacherRole.id]
+    });
+    const attendanceReviewerLogin = await post("/auth/login", { email: attendanceReviewer.email, password: attendanceReviewerPassword, deviceId: "00000000-0000-4000-8000-000000000001" });
+    attendanceReviewerToken = attendanceReviewerLogin.accessToken;
 
     const config = await authGet("/school-config");
     academicYearId = config.school.currentAcademicYearId ?? config.academicYears[0].id;
@@ -191,19 +205,24 @@ describe("Phase 1 core integration", () => {
     });
     expect(checkOut.status).toBe("CHECKED_OUT");
 
-    const dayRows = await authGet("/teacher-attendance?date=2026-08-12");
+    const dayRows = await authGetAs(attendanceReviewerToken, "/teacher-attendance?date=2026-08-12");
     expect(dayRows.some((row: { id: string }) => row.id === checkIn.id)).toBe(true);
 
     await post(`/teacher-attendance/${checkIn.id}/correction-request`, {
-      requestedBy: teacher.id,
+      staffId: "TCH-001",
+      pin: "1234",
       reason: "Missed morning assembly duty confirmation.",
       requestedCheckInAt: "2026-08-12T07:50:00.000Z",
       requestedCheckOutAt: null
     });
-    const correctionRows = await authGet("/teacher-attendance/correction-requests");
+    const correctionRows = await authGetAs(attendanceReviewerToken, "/teacher-attendance/correction-requests");
     expect(correctionRows.some((row: { id: string }) => row.id === checkIn.id)).toBe(true);
 
-    const approved = await authPost(`/teacher-attendance/${checkIn.id}/approve-correction`, {});
+    const administratorApproval = await rawPost(`/teacher-attendance/${checkIn.id}/approve-correction`, {}, token);
+    const teacherApproval = await rawPost(`/teacher-attendance/${checkIn.id}/approve-correction`, {}, classTeacherToken);
+    expect(administratorApproval.status).toBe(403);
+    expect(teacherApproval.status).toBe(403);
+    const approved = await authPostAs(attendanceReviewerToken, `/teacher-attendance/${checkIn.id}/approve-correction`, {});
     expect(approved.approvalStatus).toBe("APPROVED");
     expect(new Date(approved.checkInAt).toISOString()).toBe("2026-08-12T07:50:00.000Z");
 

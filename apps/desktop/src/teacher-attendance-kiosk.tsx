@@ -61,7 +61,8 @@ export function TeacherAttendanceKiosk() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          requestedBy: lastRecord.teacherId,
+          staffId,
+          pin,
           reason: correctionReason.trim(),
           requestedCheckInAt: requestedCheckInAt ? new Date(requestedCheckInAt).toISOString() : null,
           requestedCheckOutAt: requestedCheckOutAt ? new Date(requestedCheckOutAt).toISOString() : null

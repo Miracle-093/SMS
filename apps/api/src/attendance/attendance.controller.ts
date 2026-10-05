@@ -19,7 +19,7 @@ export class AttendanceController {
 
   @Get("correction-requests")
   @UseGuards(AuthGuard, PermissionGuard)
-  @RequirePermissions(PermissionKey.AttendanceManage)
+  @RequirePermissions(PermissionKey.AttendanceManage, PermissionKey.ApprovalReview)
   correctionRequests(@CurrentUserParam() user: CurrentUser) {
     return this.attendanceService.correctionRequests(user.schoolId);
   }
@@ -35,20 +35,20 @@ export class AttendanceController {
   }
 
   @Post(":id/correction-request")
-  requestCorrection(@Param("id") id: string, @Body() body: { requestedBy: string; reason: string; requestedCheckInAt?: string; requestedCheckOutAt?: string }) {
+  requestCorrection(@Param("id") id: string, @Body() body: { staffId: string; pin: string; reason: string; requestedCheckInAt?: string; requestedCheckOutAt?: string }) {
     return this.attendanceService.requestCorrection(id, body);
   }
 
   @Post(":id/approve-correction")
   @UseGuards(AuthGuard, PermissionGuard)
-  @RequirePermissions(PermissionKey.AttendanceManage)
+  @RequirePermissions(PermissionKey.AttendanceManage, PermissionKey.ApprovalReview)
   approveCorrection(@CurrentUserParam() user: CurrentUser, @Param("id") id: string) {
     return this.attendanceService.approveCorrection(user, id);
   }
 
   @Post(":id/reject-correction")
   @UseGuards(AuthGuard, PermissionGuard)
-  @RequirePermissions(PermissionKey.AttendanceManage)
+  @RequirePermissions(PermissionKey.AttendanceManage, PermissionKey.ApprovalReview)
   rejectCorrection(@CurrentUserParam() user: CurrentUser, @Param("id") id: string, @Body() body: { reason?: string }) {
     return this.attendanceService.rejectCorrection(user, id, body.reason);
   }

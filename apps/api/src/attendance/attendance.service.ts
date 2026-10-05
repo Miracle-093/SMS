@@ -96,15 +96,16 @@ export class AttendanceService {
     });
   }
 
-  async requestCorrection(id: string, input: { requestedBy: string; reason: string; requestedCheckInAt?: string; requestedCheckOutAt?: string }) {
+  async requestCorrection(id: string, input: { staffId: string; pin: string; reason: string; requestedCheckInAt?: string; requestedCheckOutAt?: string }) {
     const attendance = await this.prisma.teacherAttendance.findUniqueOrThrow({ where: { id } });
-    if (attendance.teacherId !== input.requestedBy || attendance.deletedAt) {
+    const teacher = await this.validateTeacherPin(input.staffId, input.pin);
+    if (attendance.teacherId !== teacher.id || attendance.deletedAt) {
       throw new BadRequestException("Correction request does not match this teacher attendance record.");
     }
     return this.prisma.teacherAttendance.update({
       where: { id },
       data: {
-        correctionRequestedBy: input.requestedBy,
+        correctionRequestedBy: teacher.id,
         correctionReason: input.reason,
         requestedCheckInAt: input.requestedCheckInAt ? new Date(input.requestedCheckInAt) : null,
         requestedCheckOutAt: input.requestedCheckOutAt ? new Date(input.requestedCheckOutAt) : null,

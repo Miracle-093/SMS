@@ -244,10 +244,12 @@ async function main() {
       await prisma.teacherAttendance.deleteMany({ where: { teacherId: teacherDb.id, attendanceDate: { gte: dayStart, lte: dayEnd } } });
       const checkIn = await publicPost(baseUrl, "/teacher-attendance/check-in", { staffId: "TCH-001", pin: "1234", deviceId, occurredAt: occurredAt.toISOString() });
       const checkOut = await publicPost(baseUrl, "/teacher-attendance/check-out", { staffId: "TCH-001", pin: "1234", deviceId, occurredAt: "2026-08-27T16:30:00.000Z" });
-      await publicPost(baseUrl, `/teacher-attendance/${checkIn.id}/correction-request`, { requestedBy: teacherDb.id, reason: "Acceptance correction request", requestedCheckInAt: "2026-08-27T07:55:00.000Z", requestedCheckOutAt: null });
-      const correction = await post(baseUrl, admin, `/teacher-attendance/${checkIn.id}/approve-correction`, {});
+      await publicPost(baseUrl, `/teacher-attendance/${checkIn.id}/correction-request`, { staffId: "TCH-001", pin: "1234", reason: "Acceptance correction request", requestedCheckInAt: "2026-08-27T07:55:00.000Z", requestedCheckOutAt: null });
+      const administratorApproval = await raw(baseUrl, admin, "POST", `/teacher-attendance/${checkIn.id}/approve-correction`, {});
+      if (administratorApproval.ok) throw new Error("School Administrator approved an attendance correction without attendance-review authority.");
+      const correction = await post(baseUrl, headTeacher, `/teacher-attendance/${checkIn.id}/approve-correction`, {});
       evidence.push(`Timetable rows visible=${timetable.length}.`);
-      evidence.push(`Check-in=${checkIn.status}; check-out=${checkOut.status}; correction approval=${correction.approvalStatus}.`);
+      evidence.push(`Check-in=${checkIn.status}; check-out=${checkOut.status}; School Administrator approval blocked=${administratorApproval.status}; Head Teacher correction approval=${correction.approvalStatus}.`);
     });
 
     await scenario("Student/parent portal essentials", "Student/parent portal user", async (evidence) => {
