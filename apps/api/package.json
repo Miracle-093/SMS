@@ -11,6 +11,7 @@
     "prisma:generate": "tsx scripts/run-prisma.ts generate",
     "prisma:migrate": "tsx scripts/run-prisma.ts migrate dev --name init",
     "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:bootstrap:production": "tsx prisma/bootstrap-production.ts",
     "db:reset:dev": "tsx scripts/reset-dev-db.ts",
     "offline:test": "vitest run test/offline-sync.test.ts",
     "offline:smoke": "tsx scripts/offline-smoke.ts",

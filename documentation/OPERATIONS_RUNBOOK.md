@@ -4,6 +4,14 @@ Release target: Aethina SMS Phase One - Client Acceptance and Pilot Release.
 
 This runbook is for the pilot environment only. Do not run destructive commands against hosted or production data without explicit approval and a fresh backup.
 
+## Destructive Database Controls
+
+Never run `prisma migrate reset`, `prisma db push`, `DROP DATABASE`, database deletion, or a destructive seed/reset script against a hosted environment without explicit written approval that names the exact database resource.
+
+The repository reset command is locked to `aethina_sms_dev` on localhost. It additionally requires `AETHINA_CONFIRM_DESTRUCTIVE_RESET=aethina_sms_dev`; that control does not replace the required written approval.
+
+Hosted schema changes use `prisma migrate deploy` only. Verify a provider recovery option and migration status before every production migration.
+
 ## Daily Startup Check
 
 1. Confirm the API health endpoint returns OK.

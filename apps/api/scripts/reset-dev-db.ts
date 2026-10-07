@@ -10,8 +10,19 @@ if (process.env.NODE_ENV !== "development") {
   throw new Error("Refusing to reset database because NODE_ENV is not explicitly development.");
 }
 
-if (!process.env.DATABASE_URL || !process.env.DATABASE_URL.includes("aethina_sms_dev")) {
-  throw new Error("Refusing to reset database because DATABASE_URL does not look like the local development database.");
+if (!process.env.DATABASE_URL) {
+  throw new Error("Refusing to reset database because DATABASE_URL is unavailable.");
+}
+
+const databaseUrl = new URL(process.env.DATABASE_URL);
+const isLocalDevelopmentDatabase = ["localhost", "127.0.0.1", "::1"].includes(databaseUrl.hostname)
+  && databaseUrl.pathname === "/aethina_sms_dev";
+if (!isLocalDevelopmentDatabase) {
+  throw new Error("Refusing to reset database because it is not the exact local aethina_sms_dev database.");
+}
+
+if (process.env.AETHINA_CONFIRM_DESTRUCTIVE_RESET !== "aethina_sms_dev") {
+  throw new Error("Refusing to reset database without AETHINA_CONFIRM_DESTRUCTIVE_RESET=aethina_sms_dev and explicit approval naming that database.");
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../../");
