@@ -18,8 +18,6 @@ export async function createAethinaApp() {
       /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}:5174$/,
       /^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}:5174$/,
       /^http:\/\/172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}:5174$/,
-      /^https:\/\/aethina-[a-z0-9-]+\.vercel\.app$/,
-      /^https:\/\/aethina-sms-[a-z0-9-]+\.vercel\.app$/,
       "tauri://localhost",
       ...configuredOrigins
     ],
