@@ -95,6 +95,7 @@ async function main() {
       "report-cards.publish",
       "timetable.manage",
       "attendance.manage",
+      "attendance.correction.review",
       "sync.review",
       "inventory.manage",
       "payroll.read",
@@ -111,7 +112,7 @@ async function main() {
   const rolePermissionMap: Record<string, string[]> = {
     "Super Administrator": Array.from(permissionByKey.keys()),
     "School Administrator": ["auth.login", "users.manage", "dashboard.read", "school-config.manage", "students.read", "audit.read", "approval.review", "risk.review", "finance.read", "budget.manage", "inventory.manage", "payroll.read", "announcements.manage", "sync.review"],
-    "Head Teacher": ["auth.login", "dashboard.read", "students.read", "audit.read", "attendance.manage", "approval.review", "academics.read", "marks.review", "announcements.manage"],
+    "Head Teacher": ["auth.login", "dashboard.read", "students.read", "audit.read", "attendance.manage", "attendance.correction.review", "approval.review", "academics.read", "marks.review", "announcements.manage"],
     "Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],
     "Lower School Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],
     "Middle School Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],

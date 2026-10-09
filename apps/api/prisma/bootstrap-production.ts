@@ -8,7 +8,7 @@ const permissionKeys = [
   "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote",
   "portal-credentials.reset", "audit.read", "dashboard.read", "finance.read", "finance.manage", "budget.manage",
   "approval.review", "risk.review", "academics.read", "academics.manage", "marks.entry", "marks.review",
-  "results.approve", "report-cards.prepare", "report-cards.publish", "timetable.manage", "attendance.manage",
+  "results.approve", "report-cards.prepare", "report-cards.publish", "timetable.manage", "attendance.manage", "attendance.correction.review",
   "sync.review", "inventory.manage", "payroll.read", "payroll.manage", "notifications.manage",
   "announcements.manage", "portal.access"
 ] as const;
@@ -16,7 +16,7 @@ const permissionKeys = [
 const roles: Record<string, readonly string[]> = {
   "Super Administrator": permissionKeys,
   "School Administrator": ["auth.login", "users.manage", "dashboard.read", "school-config.manage", "students.read", "audit.read", "approval.review", "risk.review", "finance.read", "budget.manage", "inventory.manage", "payroll.read", "announcements.manage", "sync.review"],
-  "Head Teacher": ["auth.login", "dashboard.read", "students.read", "audit.read", "attendance.manage", "approval.review", "academics.read", "marks.review", "announcements.manage"],
+  "Head Teacher": ["auth.login", "dashboard.read", "students.read", "audit.read", "attendance.manage", "attendance.correction.review", "approval.review", "academics.read", "marks.review", "announcements.manage"],
   "Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],
   "Lower School Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],
   "Middle School Dean of Studies": ["auth.login", "dashboard.read", "admissions.manage", "academic-setup.manage", "teacher-subjects.manage", "class-teachers.manage", "students.read", "students.manage", "students.promote", "portal-credentials.reset", "academics.read", "academics.manage", "marks.review", "results.approve", "report-cards.publish", "timetable.manage", "announcements.manage"],

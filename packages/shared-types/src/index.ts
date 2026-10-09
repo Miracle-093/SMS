@@ -94,6 +94,7 @@ export enum PermissionKey {
   AnnouncementsManage = "announcements.manage",
   PortalAccess = "portal.access",
   AttendanceManage = "attendance.manage",
+  AttendanceCorrectionReview = "attendance.correction.review",
   SyncReview = "sync.review"
 }
 
