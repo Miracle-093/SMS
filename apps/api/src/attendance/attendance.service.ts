@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { ApprovalStatus, CurrentUser, SyncStatus, TeacherAttendanceStatus } from "@aethina/shared-types";
 import { AuditService } from "../audit/audit.service.js";
 import { PasswordService } from "../auth/password.service.js";
@@ -119,7 +119,7 @@ export class AttendanceService {
   async approveCorrection(user: CurrentUser, id: string) {
     const attendance = await this.prisma.teacherAttendance.findUniqueOrThrow({ where: { id } });
     if (attendance.schoolId !== user.schoolId) {
-      throw new BadRequestException("Attendance record does not belong to this school.");
+      throw new NotFoundException("Attendance correction was not found.");
     }
     const updated = await this.prisma.teacherAttendance.update({
       where: { id },
@@ -148,7 +148,7 @@ export class AttendanceService {
   async rejectCorrection(user: CurrentUser, id: string, reason?: string) {
     const attendance = await this.prisma.teacherAttendance.findUniqueOrThrow({ where: { id } });
     if (attendance.schoolId !== user.schoolId) {
-      throw new BadRequestException("Attendance record does not belong to this school.");
+      throw new NotFoundException("Attendance correction was not found.");
     }
     const updated = await this.prisma.teacherAttendance.update({
       where: { id },
