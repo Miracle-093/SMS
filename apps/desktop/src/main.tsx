@@ -742,7 +742,7 @@ function App() {
         ) : activeView === "school" ? (
           <SchoolConfigView config={config} scope={workspaceScope} api={api} refreshAll={refreshAll} setMessage={showMessage} />
         ) : activeView === "attendance" ? (
-          <AttendanceView api={api} setMessage={showMessage} canReview={session.user.permissions.includes(PermissionKey.AttendanceManage) && session.user.permissions.includes(PermissionKey.ApprovalReview)} />
+          <AttendanceView api={api} setMessage={showMessage} canReview={session.user.permissions.includes(PermissionKey.AttendanceCorrectionReview)} />
         ) : activeView === "sync" ? (
           <SyncReviewView api={api} setMessage={showMessage} />
         ) : activeView === "audit" ? (
