@@ -12,6 +12,8 @@
     "prisma:migrate": "tsx scripts/run-prisma.ts migrate dev --name init",
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:fixture:staging": "tsx prisma/fixture-staging.ts",
+    "prisma:recover:staging-credentials": "tsx prisma/recover-staging-credentials.ts",
+    "prisma:cleanup:staging-credentials": "tsx prisma/cleanup-staging-credential-handoff.ts",
     "prisma:bootstrap:production": "tsx prisma/bootstrap-production.ts",
     "db:reset:dev": "tsx scripts/reset-dev-db.ts",
     "offline:test": "vitest run test/offline-sync.test.ts",
