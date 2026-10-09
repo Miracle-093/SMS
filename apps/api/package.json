@@ -14,6 +14,8 @@
     "prisma:fixture:staging": "tsx prisma/fixture-staging.ts",
     "prisma:recover:staging-credentials": "tsx prisma/recover-staging-credentials.ts",
     "prisma:cleanup:staging-credentials": "tsx prisma/cleanup-staging-credential-handoff.ts",
+    "prisma:extend:staging-credentials": "tsx prisma/extend-staging-credential-handoff.ts",
+    "prisma:backfill:staging-attendance-review": "tsx prisma/backfill-staging-attendance-review.ts",
     "prisma:bootstrap:production": "tsx prisma/bootstrap-production.ts",
     "db:reset:dev": "tsx scripts/reset-dev-db.ts",
     "offline:test": "vitest run test/offline-sync.test.ts",
