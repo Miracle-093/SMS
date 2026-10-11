@@ -1,6 +1,6 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { ApprovalStatus, CurrentUser, SyncStatus, TeacherAttendanceStatus } from "@aethina/shared-types";
-import { AuditService } from "../audit/audit.service.js";
 import { PasswordService } from "../auth/password.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 
@@ -8,8 +8,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 export class AttendanceService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(PasswordService) private readonly passwords: PasswordService,
-    @Inject(AuditService) private readonly audit: AuditService
+    @Inject(PasswordService) private readonly passwords: PasswordService
   ) {}
 
   async list(schoolId: string, date?: string) {
@@ -84,6 +83,9 @@ export class AttendanceService {
     if (!attendance?.checkInAt) {
       throw new BadRequestException("Teacher must check in before checking out.");
     }
+    if (attendance.correctionRequestedBy) {
+      throw new ConflictException("This attendance correction has already been decided.");
+    }
 
     return this.prisma.teacherAttendance.update({
       where: { id: attendance.id },
@@ -102,8 +104,8 @@ export class AttendanceService {
     if (attendance.teacherId !== teacher.id || attendance.deletedAt) {
       throw new BadRequestException("Correction request does not match this teacher attendance record.");
     }
-    return this.prisma.teacherAttendance.update({
-      where: { id },
+    const claimed = await this.prisma.teacherAttendance.updateMany({
+      where: { id, teacherId: teacher.id, deletedAt: null, correctionRequestedBy: null },
       data: {
         correctionRequestedBy: teacher.id,
         correctionReason: input.reason,
@@ -114,64 +116,73 @@ export class AttendanceService {
         version: { increment: 1 }
       }
     });
+    if (claimed.count === 0) {
+      throw new ConflictException("This attendance correction has already been decided.");
+    }
+    return this.prisma.teacherAttendance.findUniqueOrThrow({ where: { id } });
   }
 
   async approveCorrection(user: CurrentUser, id: string) {
-    const attendance = await this.prisma.teacherAttendance.findUniqueOrThrow({ where: { id } });
-    if (attendance.schoolId !== user.schoolId) {
-      throw new NotFoundException("Attendance correction was not found.");
-    }
-    const updated = await this.prisma.teacherAttendance.update({
-      where: { id },
-      data: {
-        checkInAt: attendance.requestedCheckInAt ?? attendance.checkInAt,
-        checkOutAt: attendance.requestedCheckOutAt ?? attendance.checkOutAt,
-        approvedBy: user.id,
-        approvedAt: new Date(),
-        status: TeacherAttendanceStatus.Corrected,
-        approvalStatus: ApprovalStatus.Approved,
-        version: { increment: 1 }
-      }
-    });
-    await this.audit.record({
-      schoolId: user.schoolId,
-      actorId: user.id,
-      action: "TEACHER_ATTENDANCE_CORRECTION_APPROVED",
-      entityType: "TEACHER_ATTENDANCE",
-      entityId: id,
-      previousValue: attendance,
-      newValue: updated
-    });
-    return updated;
+    return this.decideCorrection(user, id, "APPROVED");
   }
 
   async rejectCorrection(user: CurrentUser, id: string, reason?: string) {
-    const attendance = await this.prisma.teacherAttendance.findUniqueOrThrow({ where: { id } });
-    if (attendance.schoolId !== user.schoolId) {
-      throw new NotFoundException("Attendance correction was not found.");
-    }
-    const updated = await this.prisma.teacherAttendance.update({
-      where: { id },
-      data: {
-        requestedCheckInAt: null,
-        requestedCheckOutAt: null,
-        approvedBy: user.id,
-        approvedAt: new Date(),
-        approvalStatus: ApprovalStatus.Rejected,
-        version: { increment: 1 }
+    return this.decideCorrection(user, id, "REJECTED", reason);
+  }
+
+  private async decideCorrection(user: CurrentUser, id: string, decision: "APPROVED" | "REJECTED", reason?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const attendance = await tx.teacherAttendance.findUnique({ where: { id } });
+      if (!attendance || attendance.schoolId !== user.schoolId || attendance.deletedAt) {
+        throw new NotFoundException("Attendance correction was not found.");
       }
+
+      const decisionTime = new Date();
+      const claim = await tx.teacherAttendance.updateMany({
+        where: { id, schoolId: user.schoolId, deletedAt: null, approvalStatus: ApprovalStatus.Pending, version: attendance.version },
+        data: decision === "APPROVED"
+          ? {
+              checkInAt: attendance.requestedCheckInAt ?? attendance.checkInAt,
+              checkOutAt: attendance.requestedCheckOutAt ?? attendance.checkOutAt,
+              approvedBy: user.id,
+              approvedAt: decisionTime,
+              status: TeacherAttendanceStatus.Corrected,
+              approvalStatus: ApprovalStatus.Approved,
+              version: { increment: 1 }
+            }
+          : {
+              requestedCheckInAt: null,
+              requestedCheckOutAt: null,
+              approvedBy: user.id,
+              approvedAt: decisionTime,
+              approvalStatus: ApprovalStatus.Rejected,
+              version: { increment: 1 }
+            }
+      });
+      if (claim.count === 0) {
+        const current = await tx.teacherAttendance.findUnique({ where: { id }, select: { schoolId: true, deletedAt: true } });
+        if (!current || current.schoolId !== user.schoolId || current.deletedAt) {
+          throw new NotFoundException("Attendance correction was not found.");
+        }
+        throw new ConflictException("This attendance correction has already been decided.");
+      }
+
+      const updated = await tx.teacherAttendance.findUniqueOrThrow({ where: { id } });
+      await tx.auditLog.create({
+        data: {
+          schoolId: user.schoolId,
+          actorId: user.id,
+          createdBy: user.id,
+          action: decision === "APPROVED" ? "TEACHER_ATTENDANCE_CORRECTION_APPROVED" : "TEACHER_ATTENDANCE_CORRECTION_REJECTED",
+          entityType: "TEACHER_ATTENDANCE",
+          entityId: id,
+          previousValue: attendance as unknown as Prisma.InputJsonValue,
+          newValue: updated as unknown as Prisma.InputJsonValue,
+          metadata: decision === "REJECTED" ? { reason: reason ?? null } : Prisma.JsonNull
+        }
+      });
+      return updated;
     });
-    await this.audit.record({
-      schoolId: user.schoolId,
-      actorId: user.id,
-      action: "TEACHER_ATTENDANCE_CORRECTION_REJECTED",
-      entityType: "TEACHER_ATTENDANCE",
-      entityId: id,
-      previousValue: attendance,
-      newValue: updated,
-      metadata: { reason: reason ?? null }
-    });
-    return updated;
   }
 
   private async validateTeacherPin(staffId: string, pin: string) {

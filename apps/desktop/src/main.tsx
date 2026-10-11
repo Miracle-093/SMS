@@ -19,7 +19,7 @@ import {
 } from "./offline-store.js";
 import { apiBaseUrl } from "./config.js";
 import { TeacherAttendanceKiosk } from "./teacher-attendance-kiosk.js";
-import { AppNotice, PermissionDeniedState, UserIdentity, errorForResponse, toUserFacingError, userMessage, type UserFacingError } from "./ui.js";
+import { AppNotice, AppRequestError, PermissionDeniedState, UserIdentity, errorForResponse, toUserFacingError, userMessage, type UserFacingError } from "./ui.js";
 import "./styles.css";
 
 const deviceId = "00000000-0000-4000-8000-000000000001";
@@ -1326,6 +1326,7 @@ function AttendanceView({ api, setMessage, canReview }: { api: (path: string, in
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [corrections, setCorrections] = useState<AttendanceRecord[]>([]);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
 
   async function load() {
     const [dayRows, pendingRows] = await Promise.all([
@@ -1341,9 +1342,21 @@ function AttendanceView({ api, setMessage, canReview }: { api: (path: string, in
   }, [date]);
 
   async function review(id: string, action: "approve" | "reject") {
-    await api(`/teacher-attendance/${id}/${action}-correction`, { method: "POST", body: JSON.stringify({ reason: "Reviewed by administrator" }) });
-    setMessage(`Correction ${action === "approve" ? "approved" : "rejected"}.`);
-    await load();
+    setReviewingId(id);
+    try {
+      await api(`/teacher-attendance/${id}/${action}-correction`, { method: "POST", body: JSON.stringify({ reason: "Reviewed by administrator" }) });
+      setMessage(`Correction ${action === "approve" ? "approved" : "rejected"}.`);
+      await load();
+    } catch (error) {
+      if (error instanceof AppRequestError && error.status === 409) {
+        setMessage("This correction has already been decided. Refreshing its latest status.");
+        await load().catch(() => undefined);
+      } else {
+        setMessage(userMessage(error, "Could not decide this correction."));
+      }
+    } finally {
+      setReviewingId(null);
+    }
   }
 
   return (
@@ -1370,8 +1383,8 @@ function AttendanceView({ api, setMessage, canReview }: { api: (path: string, in
                 <td>{record.correctionReason ?? "-"}</td>
                 <td>{formatTime(record.requestedCheckInAt)} / {formatTime(record.requestedCheckOutAt)}</td>
                 <td className="row-actions">
-                  <button type="button" onClick={() => void review(record.id, "approve")}>Approve</button>
-                  <button className="ghost" type="button" onClick={() => void review(record.id, "reject")}>Reject</button>
+                  <button type="button" onClick={() => void review(record.id, "approve")} disabled={reviewingId === record.id}>Approve</button>
+                  <button className="ghost" type="button" onClick={() => void review(record.id, "reject")} disabled={reviewingId === record.id}>Reject</button>
                 </td>
               </tr>
             ))}
