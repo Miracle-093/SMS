@@ -781,7 +781,11 @@ function App() {
         {workspaceScope?.studentFilters.length ? (
           <RosterImportPreview api={api} scope={workspaceScope} setMessage={showMessage} />
         ) : null}
-        <section className="content-grid">
+        <section className="student-command-panel">
+          <div><p className="eyebrow">Learner records</p><h3>Admissions and student profiles</h3><p className="panel-copy">Find a learner, review their family context, and keep placement and registration details complete.</p></div>
+          {canManageStudents && <button type="button" onClick={() => { setSelected(null); setForm(emptyForm); }}>Register student</button>}
+        </section>
+        <section className="content-grid student-records-layout">
           <section className="list-pane">
             <div className="filters">
               <input placeholder="Search admission no. or name" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} />
@@ -959,25 +963,26 @@ function WorkspaceScopePanel({ summary, onStudentFilter }: { summary: WorkspaceS
 function StudentProfile({ student, canResetPortal, onReset }: { student: Student; canResetPortal: boolean; onReset: () => void }) {
   const guardian = student.guardians?.[0];
   return (
-    <div className="profile">
+    <div className="profile student-profile">
       <div className="profile-header">
         <div className="avatar">{student.firstName.slice(0, 1)}{student.lastName.slice(0, 1)}</div>
         <div>
           <h3>{student.firstName} {student.middleName} {student.lastName}</h3>
-          <p>{student.admissionNo}</p>
+          <p>{student.admissionNo} <span className="pill">{student.status}</span></p>
         </div>
       </div>
-      <dl className="profile-details">
+      <div className="student-profile-context"><span><strong>{student.currentClass?.name ?? "Class not assigned"}</strong>Class</span><span><strong>{student.currentStream?.name ?? "No stream"}</strong>Stream</span><span><strong>{new Date(student.admissionDate).toLocaleDateString()}</strong>Admitted</span></div>
+      <h4>Family and contact</h4>
+      <dl className="profile-details student-profile-details">
         <dt>Guardian</dt><dd>{guardian?.guardian.fullName ?? "-"}</dd>
         <dt>Relationship</dt><dd>{guardian?.relationship ?? "-"}</dd>
         <dt>Phone</dt><dd>{guardian?.guardian.phone ?? "-"}</dd>
         <dt>Email</dt><dd>{guardian?.guardian.email ?? "-"}</dd>
         <dt>Emergency</dt><dd>{student.emergencyContact ?? "-"}</dd>
-        <dt>Medical</dt><dd>{student.medicalNotes ?? "None"}</dd>
-        <dt>Portal</dt><dd>{student.portalCredential?.username ?? "Pending"}</dd>
+        <dt>Portal access</dt><dd>{student.portalCredential?.username ? "Enabled" : "Not issued"}</dd>
       </dl>
-      {canResetPortal && <button onClick={onReset}>Reset Portal Credentials</button>}
-      <h4>Promotion History</h4>
+      <div className="student-profile-actions">{canResetPortal && <button type="button" className="ghost" onClick={onReset}>Reset portal access</button>}<button type="button" className="ghost no-print" onClick={printPage}>Print profile</button></div>
+      <h4>Academic history</h4>
       <ul className="history">
         {(student.promotions ?? []).map((promotion) => <li key={promotion.id}>{new Date(promotion.promotionDate).toLocaleDateString()} to class {promotion.newClassId}</li>)}
         {(student.promotions ?? []).length === 0 && <li>No promotions recorded.</li>}
@@ -990,10 +995,11 @@ function StudentForm({ form, setForm, config, onSubmit, submitting }: { form: Re
   const selectedClass = config?.classes.find((item) => item.id === form.currentClassId);
   const update = (key: keyof RegistrationForm, value: string) => setForm({ ...form, [key]: value });
   return (
-    <form className="student-form" onSubmit={onSubmit}>
+    <form className="student-form registration-journey" onSubmit={onSubmit}>
       <fieldset className="student-form-section">
-        <legend>Student Details</legend>
-        <label>Admission No.<input value={form.admissionNo} onChange={(event) => update("admissionNo", event.target.value)} placeholder="Auto if blank" /></label>
+        <legend>1. Personal details</legend>
+        <p className="form-help">Required information is marked. An admission number is created if you leave it blank.</p>
+        <label>Admission No. <span className="field-optional">Optional</span><input value={form.admissionNo} onChange={(event) => update("admissionNo", event.target.value)} placeholder="Generated automatically" /></label>
         <label>First name<input required value={form.firstName} onChange={(event) => update("firstName", event.target.value)} /></label>
         <label>Middle name<input value={form.middleName} onChange={(event) => update("middleName", event.target.value)} /></label>
         <label>Last name<input required value={form.lastName} onChange={(event) => update("lastName", event.target.value)} /></label>
@@ -1001,7 +1007,7 @@ function StudentForm({ form, setForm, config, onSubmit, submitting }: { form: Re
         <label>Date of birth<input type="date" value={form.dateOfBirth} onChange={(event) => update("dateOfBirth", event.target.value)} /></label>
       </fieldset>
       <fieldset className="student-form-section">
-        <legend>Placement</legend>
+        <legend>2. Admission and academic placement</legend>
         <label>Academic year<select value={form.currentAcademicYearId} onChange={(event) => update("currentAcademicYearId", event.target.value)}>{config?.academicYears.map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}</select></label>
         <label>Class<select required value={form.currentClassId} onChange={(event) => update("currentClassId", event.target.value)}>{config?.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label>Stream<select value={form.currentStreamId} onChange={(event) => update("currentStreamId", event.target.value)}><option value="">None</option>{selectedClass?.streams.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -1010,7 +1016,7 @@ function StudentForm({ form, setForm, config, onSubmit, submitting }: { form: Re
         <label>Previous school<input value={form.previousSchool} onChange={(event) => update("previousSchool", event.target.value)} /></label>
       </fieldset>
       <fieldset className="student-form-section">
-        <legend>Guardian & Contacts</legend>
+        <legend>3. Guardian and contact information</legend>
         <label>Guardian name<input required value={form.guardianFullName} onChange={(event) => update("guardianFullName", event.target.value)} /></label>
         <label>Relationship<input required value={form.guardianRelationship} onChange={(event) => update("guardianRelationship", event.target.value)} /></label>
         <label>Guardian phone<input required value={form.guardianPhone} onChange={(event) => update("guardianPhone", event.target.value)} /></label>
@@ -1019,13 +1025,14 @@ function StudentForm({ form, setForm, config, onSubmit, submitting }: { form: Re
         <label>Emergency contact<input required value={form.emergencyContact} onChange={(event) => update("emergencyContact", event.target.value)} /></label>
       </fieldset>
       <fieldset className="student-form-section wide">
-        <legend>Records</legend>
+        <legend>4. Supporting records and portal access</legend>
+        <p className="form-help">Portal access is issued after the learner record is saved. Do not enter passwords here.</p>
         <label>Photo URL<input value={form.photoUrl} onChange={(event) => update("photoUrl", event.target.value)} /></label>
         <label>Document URLs<input value={form.supportingDocuments} onChange={(event) => update("supportingDocuments", event.target.value)} placeholder="Comma-separated URLs" /></label>
         <label>Medical notes<textarea value={form.medicalNotes} onChange={(event) => update("medicalNotes", event.target.value)} /></label>
         <label>Notes<textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label>
       </fieldset>
-      <button type="submit" disabled={submitting}>{submitting ? "Saving student..." : "Save Student"}</button>
+      <div className="registration-submit"><span>Review required learner and guardian fields before saving.</span><button type="submit" disabled={submitting}>{submitting ? "Saving student…" : "Save student record"}</button></div>
     </form>
   );
 }
@@ -1496,14 +1503,15 @@ function AuditView({ api }: { api: (path: string, init?: RequestInit) => Promise
   }, []);
 
   return (
-    <section className="operation-panel">
+    <section className="audit-workspace operation-panel">
+      <div className="section-heading"><div><p className="eyebrow">Governance trail</p><h3>Audit investigation</h3><p className="panel-copy">Search human-readable events. Technical references remain deliberately concealed.</p></div><button type="button" className="ghost" onClick={() => void load()}>Refresh log</button></div>
       <div className="filters audit-filters">
         <input placeholder="Filter action" value={action} onChange={(event) => setAction(event.target.value)} />
         <input placeholder="Entity type" value={entityType} onChange={(event) => setEntityType(event.target.value.toUpperCase())} />
         <button type="button" onClick={() => void load()}>Search</button>
       </div>
       <DataTable label="Audit log events">
-        <thead><tr><th>Time</th><th>Event</th><th>Module</th><th>Actor</th></tr></thead>
+        <thead><tr><th>Date and time</th><th>Activity</th><th>Resource</th><th>Actor</th></tr></thead>
         <tbody>
           {records.map((record) => (
             <tr key={record.id}>
@@ -1512,8 +1520,7 @@ function AuditView({ api }: { api: (path: string, init?: RequestInit) => Promise
                 {formatAuditAction(record.action)}
                 <details className="row-details">
                   <summary>Details</summary>
-                  <small>Action: {record.action}</small><br />
-                  <small>Record: {record.entityId}</small>
+                  <small>Recorded event: {formatAuditAction(record.action)}</small>
                 </details>
               </td>
               <td>{formatEntityName(record.entityType)}</td>
@@ -2355,14 +2362,23 @@ function BudgetsView({ api, config, session, online, refreshOfflineState, setMes
 
 function ApprovalsView({ api, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; setMessage: (message: string) => void }) {
   const [rows, setRows] = useState<ApprovalRecord[]>([]);
+  const [comment, setComment] = useState("");
+  const [busyId, setBusyId] = useState("");
   async function load() { setRows(asArray<ApprovalRecord>(await api("/approvals"))); }
   useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Approvals unavailable."))); }, []);
   async function decide(id: string, decision: string) {
-    await api(`/approvals/${id}/decision`, { method: "POST", body: JSON.stringify({ decision, comment: `Desktop ${decision.toLowerCase()} decision` }) });
-    setMessage(`Approval ${decision.toLowerCase().replaceAll("_", " ")}.`);
-    await load();
+    if (!window.confirm(`Confirm ${decision.toLowerCase()} for this approval item?`)) return;
+    setBusyId(id);
+    try {
+      await api(`/approvals/${id}/decision`, { method: "POST", body: JSON.stringify({ decision, comment: comment.trim() || `Desktop ${decision.toLowerCase()} decision` }) });
+      setComment("");
+      setMessage(`Approval ${decision.toLowerCase().replaceAll("_", " ")}.`);
+      await load();
+    } catch (error) {
+      setMessage(userMessage(error, "This approval is already final or is no longer available for a decision."));
+    } finally { setBusyId(""); }
   }
-  return <section className="operation-panel"><div className="section-heading"><h3>Approval Inbox</h3><button type="button" onClick={() => void load()}>Refresh</button></div><DataTable label="Approval inbox"><thead><tr><th>Type</th><th>Submitted</th><th>Level</th><th>Status</th><th>Decision</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.entityType}<br /><small>{row.entityId}</small></td><td>{new Date(row.createdAt).toLocaleString()}</td><td>{row.approvalLevel}</td><td><span className="pill">{row.status}</span></td><td className="row-actions"><button type="button" onClick={() => void decide(row.id, "APPROVED")}>Approve</button><button className="ghost" type="button" onClick={() => void decide(row.id, "REJECTED")}>Reject</button><button className="ghost" type="button" onClick={() => void decide(row.id, "RETURNED_FOR_CORRECTION")}>Return</button></td></tr>)}{rows.length === 0 && <tr><td colSpan={5} className="empty">No approval items waiting.</td></tr>}</tbody></DataTable></section>;
+  return <section className="approval-workspace operation-panel"><div className="section-heading"><div><p className="eyebrow">Executive decisions</p><h3>Approval inbox</h3><p className="panel-copy">Review the item, add context when useful, then confirm one final decision.</p></div><button type="button" className="ghost" onClick={() => void load()}>Refresh</button></div><label className="approval-note">Decision note <textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Optional for approval; include a clear reason when returning or rejecting." rows={2} /></label><DataTable label="Approval inbox"><thead><tr><th>Request</th><th>Submitted</th><th>Review level</th><th>Status</th><th>Decision</th></tr></thead><tbody>{rows.map((row) => { const terminal = ["APPROVED", "REJECTED", "RETURNED_FOR_CORRECTION"].includes(row.status); return <tr key={row.id}><td><strong>{formatEntityName(row.entityType)}</strong><br /><small>Request awaiting governance review</small></td><td>{new Date(row.createdAt).toLocaleString()}</td><td>Level {row.approvalLevel}</td><td><span className="pill">{financeLabel(row.status)}</span></td><td className="row-actions">{terminal ? <span className="pill muted-pill">Final</span> : <><button type="button" disabled={busyId === row.id} onClick={() => void decide(row.id, "APPROVED")}>{busyId === row.id ? "Saving…" : "Approve"}</button><button className="ghost" type="button" disabled={busyId === row.id} onClick={() => void decide(row.id, "REJECTED")}>Reject</button><button className="ghost" type="button" disabled={busyId === row.id} onClick={() => void decide(row.id, "RETURNED_FOR_CORRECTION")}>Return</button></>}</td></tr>; })}{rows.length === 0 && <tr><td colSpan={5} className="empty">No approval items are waiting for this role.</td></tr>}</tbody></DataTable></section>;
 }
 
 function UsersRolesView({ api, session, setMessage }: { api: (path: string, init?: RequestInit) => Promise<any>; session: Session; setMessage: (message: string) => void }) {
