@@ -50,12 +50,6 @@ export function AppNotice({ error, message }: { error?: UserFacingError | null; 
   return (
     <div className="notice app-notice" role={error ? "alert" : "status"} aria-live={error ? "assertive" : "polite"} aria-atomic="true">
       <span>{display.message}</span>
-      {display.details && (
-        <details>
-          <summary>Technical details</summary>
-          <pre>{display.details}</pre>
-        </details>
-      )}
     </div>
   );
 }

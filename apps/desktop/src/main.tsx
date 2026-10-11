@@ -352,12 +352,15 @@ function App() {
   const [localStudents, setLocalStudents] = useState<Student[]>([]);
   const [selected, setSelected] = useState<Student | null>(null);
   const [form, setForm] = useState<RegistrationForm>(emptyForm);
+  const [studentSubmitting, setStudentSubmitting] = useState(false);
   const [filters, setFilters] = useState({ search: "", classId: "", streamId: "", status: "", academicYearId: "" });
   const [online, setOnline] = useState(navigator.onLine);
   const [message, setMessage] = useState("Ready");
   const [errorNotice, setErrorNotice] = useState<UserFacingError | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSync, setLastSync] = useState("Never");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const visibleSections = useMemo(() => session ? sectionsForUser(session.user.permissions) : [], [session]);
   const persona = session ? personaFor(session.user.roles, session.user.permissions) : null;
   const permissionSet = useMemo(() => new Set(session?.user.permissions ?? []), [session]);
@@ -383,6 +386,7 @@ function App() {
     if (visibleSections.some((section) => section.id === view)) {
       setErrorNotice(null);
       setActiveView(view);
+      setMobileNavigationOpen(false);
       return;
     }
     setErrorNotice({ message: "You do not have permission to access this section." });
@@ -518,11 +522,13 @@ function App() {
   async function submitStudent(event: React.FormEvent) {
     event.preventDefault();
     if (!session) return;
+    if (studentSubmitting) return;
     const registration = { ...toRegistration(form, session.user.schoolId), id: selected?.id };
     if (!registration.firstName || !registration.lastName || !registration.currentClassId || !registration.guardianPhone) {
       showMessage("Please complete required student and guardian fields.");
       return;
     }
+    setStudentSubmitting(true);
     try {
       const result = selected?.syncStatus === "PENDING"
         ? await saveOffline(registration, "UPDATE")
@@ -537,6 +543,8 @@ function App() {
     } catch {
       await saveOffline(registration, selected ? "UPDATE" : "CREATE");
       showMessage("API unavailable. Student saved locally and queued for synchronization.");
+    } finally {
+      setStudentSubmitting(false);
     }
   }
 
@@ -631,45 +639,57 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div>
-          <p className="eyebrow">{schoolName}</p>
-          <h1>Administration</h1>
+    <main className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+      {mobileNavigationOpen && <button className="mobile-nav-scrim" type="button" aria-label="Close navigation" onClick={() => setMobileNavigationOpen(false)} />}
+      <aside className={`sidebar${mobileNavigationOpen ? " mobile-open" : ""}`} aria-label="Staff navigation">
+        <div className="sidebar-main">
+          <div className="brand-lockup">
+            <span className="brand-mark" aria-hidden="true">A</span>
+            <div className="brand-copy">
+              <p className="eyebrow">{schoolName}</p>
+              <h1>Staff workspace</h1>
+            </div>
+          </div>
           <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} scope={workspaceScope?.title} />
-        </div>
-        <nav aria-label="Staff workspace navigation">
+          <nav aria-label="Staff workspace navigation">
           {groupedSections.map((group) => (
             <div className="nav-group" key={group.group}>
               <span className="nav-group-label">{group.group}</span>
-              {group.sections.map((section) => <button key={section.id} type="button" className={activeView === section.id ? "active" : ""} onClick={() => selectView(section.id)}>{section.label}</button>)}
+              {group.sections.map((section) => <button key={section.id} type="button" className={activeView === section.id ? "active" : ""} aria-current={activeView === section.id ? "page" : undefined} title={sidebarCollapsed ? section.label : undefined} onClick={() => selectView(section.id)}><span className="nav-dot" aria-hidden="true" /> <span>{section.label}</span></button>)}
             </div>
           ))}
-        </nav>
-        <button className="ghost" type="button" onClick={logout}>Logout</button>
+          </nav>
+        </div>
+        <div className="sidebar-footer">
+          <button className="sidebar-collapse" type="button" aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}>{sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}</button>
+          <button className="sidebar-signout" type="button" onClick={logout}>Sign out</button>
+        </div>
       </aside>
 
       <section className="workspace">
         <header className="mobile-admin-bar">
+          <button className="mobile-menu-button" type="button" aria-label="Open navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}><span /><span /><span /></button>
           <div>
             <p className="eyebrow">{schoolName}</p>
-            <strong>{session.user.displayName}</strong>
-            <span>{roleWorkspaceName}</span>
+            <strong>{viewTitle(activeView)}</strong>
+            <span>{roleWorkspaceName} · {session.user.displayName}</span>
           </div>
-          <button className="ghost" type="button" onClick={logout}>Logout</button>
+          <button className="mobile-account-button" type="button" onClick={logout}>Sign out</button>
         </header>
         <header className="topbar">
           <div>
-            <p className="eyebrow">{schoolName}</p>
+            <p className="breadcrumb">{schoolName} <span>/</span> {roleWorkspaceName}</p>
             <h2>{activeView === "dashboard" ? `${roleWorkspaceName} Dashboard` : viewTitle(activeView)}</h2>
             {persona && <p className="role-caption">{persona.title} - {persona.summary}</p>}
           </div>
-          <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} scope={workspaceScope?.title} />
-          <div className="status-strip">
+          <div className="topbar-actions">
+            <UserIdentity displayName={session.user.displayName} roles={session.user.roles} workspace={roleWorkspaceName} school={schoolName} scope={workspaceScope?.title} />
+          <div className="status-strip" aria-label="Synchronization status">
             <span className={online ? "status online" : "status offline"}>{online ? "Online" : "Offline"}</span>
-            <span>{pendingCount} pending</span>
-            <span>Last sync: {lastSync}</span>
-            <button type="button" onClick={synchronize}>Sync</button>
+            <span className="sync-detail">{pendingCount} pending</span>
+            <span className="sync-detail">Last sync: {lastSync}</span>
+            <button type="button" className="ghost compact-action" onClick={synchronize}>Sync now</button>
+          </div>
           </div>
         </header>
 
@@ -821,7 +841,7 @@ function App() {
               <h3>{selected ? "Edit Student" : "Register Student"}</h3>
               {selected && <button className="ghost" type="button" onClick={() => { setSelected(null); setForm(emptyForm); }}>New registration</button>}
             </div>
-            <StudentForm form={form} setForm={setForm} config={config} onSubmit={submitStudent} />
+            <StudentForm form={form} setForm={setForm} config={config} onSubmit={submitStudent} submitting={studentSubmitting} />
           </section>
         ) : (
           <section className="form-band muted-panel">
@@ -963,7 +983,7 @@ function StudentProfile({ student, canResetPortal, onReset }: { student: Student
   );
 }
 
-function StudentForm({ form, setForm, config, onSubmit }: { form: RegistrationForm; setForm: (form: RegistrationForm) => void; config: SchoolConfig | null; onSubmit: (event: React.FormEvent) => void }) {
+function StudentForm({ form, setForm, config, onSubmit, submitting }: { form: RegistrationForm; setForm: (form: RegistrationForm) => void; config: SchoolConfig | null; onSubmit: (event: React.FormEvent) => void; submitting: boolean }) {
   const selectedClass = config?.classes.find((item) => item.id === form.currentClassId);
   const update = (key: keyof RegistrationForm, value: string) => setForm({ ...form, [key]: value });
   return (
@@ -1002,7 +1022,7 @@ function StudentForm({ form, setForm, config, onSubmit }: { form: RegistrationFo
         <label>Medical notes<textarea value={form.medicalNotes} onChange={(event) => update("medicalNotes", event.target.value)} /></label>
         <label>Notes<textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label>
       </fieldset>
-      <button type="submit">Save Student</button>
+      <button type="submit" disabled={submitting}>{submitting ? "Saving student..." : "Save Student"}</button>
     </form>
   );
 }
