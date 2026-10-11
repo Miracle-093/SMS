@@ -23,7 +23,6 @@ import { AppNotice, AppRequestError, PermissionDeniedState, UserIdentity, errorF
 import "./styles.css";
 
 const deviceId = "00000000-0000-4000-8000-000000000001";
-const demoMode = import.meta.env.VITE_DEMO_MODE === "true" || import.meta.env.DEV;
 
 type Session = {
   accessToken: string;
@@ -70,6 +69,11 @@ const appSections: AppSection[] = [
   { id: "risk", label: "Risk Alerts", group: "Governance", permissions: [PermissionKey.RiskReview] },
   { id: "audit", label: "Audit", group: "Governance", permissions: [PermissionKey.AuditRead] }
 ];
+
+function initialWorkspaceView(): ActiveView {
+  const candidate = window.location.hash.replace(/^#/, "") as ActiveView;
+  return appSections.some((section) => section.id === candidate) ? candidate : "dashboard";
+}
 
 type SchoolConfig = {
   school: { id: string; name: string; code: string; phone?: string; email?: string; address?: string; admissionNumberPrefix?: string; currentAcademicYearId?: string; currentTermId?: string };
@@ -346,7 +350,7 @@ const emptyForm: RegistrationForm = {
 
 function App() {
   const [session, setSession] = useState<Session | null>(() => readJson<Session | null>("aethina.session", null));
-  const [activeView, setActiveView] = useState<ActiveView>("dashboard");
+  const [activeView, setActiveView] = useState<ActiveView>(initialWorkspaceView);
   const [config, setConfig] = useState<SchoolConfig | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [localStudents, setLocalStudents] = useState<Student[]>([]);
@@ -856,18 +860,17 @@ function App() {
 }
 
 function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) => Promise<void> }) {
-  const [email, setEmail] = useState(demoMode ? "admin@aethina.test" : "");
-  const [password, setPassword] = useState(demoMode ? "AdminPass123" : "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   return (
     <main className="login-screen">
       <form className="login-panel" onSubmit={async (event) => { event.preventDefault(); setError(""); try { await onLogin(email, password); } catch { setError("Check your email and password."); } }}>
         <p className="eyebrow">Satelite Secondary</p>
         <h1>Sign in</h1>
-        <p className="login-copy">Admin, bursar, teacher, attendance kiosk, finance, academics, inventory, payroll, approvals, and offline sync.</p>
-        {demoMode && <div className="demo-strip">Demo admin: admin@aethina.test / AdminPass123</div>}
-        <label>Email<input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-        <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        <p className="login-copy">Use the school-issued staff account assigned to your role. Your available workspace is determined after sign-in.</p>
+        <label>Email<input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+        <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
         {error && <p className="error">{error}</p>}
         <button type="submit">Login</button>
       </form>
@@ -2815,6 +2818,10 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
   const [marksEntry, setMarksEntry] = useState<{ assessment: any; students: any[] } | null>(null);
   const [marksDraft, setMarksDraft] = useState<Record<string, { score: string; teacherComment: string }>>({});
   const [marksBusy, setMarksBusy] = useState(false);
+  const [academicsLoading, setAcademicsLoading] = useState(true);
+  const [examSubmitting, setExamSubmitting] = useState(false);
+  const [assessmentSubmitting, setAssessmentSubmitting] = useState(false);
+  const [marksSearch, setMarksSearch] = useState("");
   const [reviewComment, setReviewComment] = useState("");
   const [reviewBusyId, setReviewBusyId] = useState("");
   const permissionSet = new Set(session.user.permissions);
@@ -2830,8 +2837,12 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
   const returnedAssessments = assessments.filter((assessment) => assessment.status === "RETURNED_FOR_CORRECTION");
   const approvedAssessments = assessments.filter((assessment) => assessment.status === "APPROVED");
   const publishedCards = cards.filter((item) => item.status === "PUBLISHED");
+  const openForMarks = assessments.filter((assessment) => assessmentOpenForMarks(assessment.status));
+  const visibleMarksStudents = marksEntry?.students.filter((student) => `${student.admissionNo} ${student.firstName} ${student.lastName}`.toLowerCase().includes(marksSearch.trim().toLowerCase())) ?? [];
   async function load() {
-    const [nextExams, nextAssessments, nextCards] = await Promise.all([api("/academics/examinations"), api("/academics/assessments"), api("/academics/report-cards")]);
+    setAcademicsLoading(true);
+    try {
+      const [nextExams, nextAssessments, nextCards] = await Promise.all([api("/academics/examinations"), api("/academics/assessments"), api("/academics/report-cards")]);
     const examRows = asArray<any>(nextExams);
     const assessmentRows = asArray<any>(nextAssessments);
     setExams(examRows);
@@ -2845,14 +2856,20 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
       streamId: current.streamId || config?.classes[0]?.streams[0]?.id || "",
       teacherId: current.teacherId || config?.teachers?.[0]?.id || ""
     }));
-    if (canEnterMarks && !selectedAssessmentId && assessmentRows[0]?.id) {
-      setSelectedAssessmentId(assessmentRows[0].id);
-      await loadMarksEntry(assessmentRows[0].id);
+      const preferredMarksAssessment = assessmentRows.find((assessment) => assessmentOpenForMarks(assessment.status)) ?? assessmentRows[0];
+      if (canEnterMarks && !selectedAssessmentId && preferredMarksAssessment?.id) {
+      setSelectedAssessmentId(preferredMarksAssessment.id);
+      await loadMarksEntry(preferredMarksAssessment.id);
+      }
+    } finally {
+      setAcademicsLoading(false);
     }
   }
   async function createExam(event: React.FormEvent) {
     event.preventDefault();
-    await api("/academics/examinations", {
+    setExamSubmitting(true);
+    try {
+      await api("/academics/examinations", {
       method: "POST",
       body: JSON.stringify({
         termId: config?.school.currentTermId,
@@ -2864,14 +2881,21 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
         status: examForm.status,
         description: examForm.description || null
       })
-    });
-    setExamForm({ ...examForm, name: "", description: "" });
-    setMessage("Examination created for the current term.");
-    await load();
+      });
+      setExamForm({ ...examForm, name: "", description: "" });
+      setMessage("Examination created for the current term.");
+      await load();
+    } catch (error) {
+      setMessage(userMessage(error, "The examination could not be created. Check the required fields and try again."));
+    } finally {
+      setExamSubmitting(false);
+    }
   }
   async function createAssessment(event: React.FormEvent) {
     event.preventDefault();
-    await api("/academics/assessments", {
+    setAssessmentSubmitting(true);
+    try {
+      await api("/academics/assessments", {
       method: "POST",
       body: JSON.stringify({
         termId: config?.school.currentTermId,
@@ -2885,10 +2909,15 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
         weight: Number(assessmentForm.weight),
         passMark: assessmentForm.passMark ? Number(assessmentForm.passMark) : null
       })
-    });
-    setAssessmentForm({ ...assessmentForm, name: "" });
-    setMessage("Assessment created and ready for marks entry.");
-    await load();
+      });
+      setAssessmentForm({ ...assessmentForm, name: "" });
+      setMessage("Assessment created and ready for marks entry.");
+      await load();
+    } catch (error) {
+      setMessage(userMessage(error, "The assessment could not be created. Check its class, subject, and score settings."));
+    } finally {
+      setAssessmentSubmitting(false);
+    }
   }
   async function decideAssessment(id: string, decision: "APPROVED" | "REJECTED" | "RETURNED" | "PUBLISHED") {
     const label = reviewDecisionLabel(decision);
@@ -2995,21 +3024,31 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
   }
   useEffect(() => { void load().catch((error) => setMessage(userMessage(error, "Academics unavailable."))); }, []);
   const termName = config?.academicYears.flatMap((year) => year.terms).find((term) => term.id === config.school.currentTermId)?.name ?? "-";
-  return <section className="operation-panel wide-panel">
+  return <section className="academic-workspace wide-panel">
     <div className="print-only">
       <h2>{config?.school.name ?? "Aethina School Management System"} Academic Report Output</h2>
       <p>Generated {new Date().toLocaleString()}</p>
     </div>
-    <div className="section-heading">
-      <h3>{canManageAcademics ? "DOS Academic Management" : canPrepareReports ? "Class Teacher Reports" : "Teacher Academics"}</h3>
+    <header className="academic-command">
+      <div>
+        <p className="eyebrow">Academic office</p>
+        <h3>{canManageAcademics ? "Academic command centre" : canPrepareReports ? "Class teacher progress desk" : "My assessment workspace"}</h3>
+        <p className="panel-copy">{canManageAcademics ? "Plan assessment work, review submitted marks, and publish results with a clear view of the current term." : canPrepareReports ? "Review your assigned class, prepare reports, and keep academic progress moving." : "Work through assigned assessments, save a draft as you go, and submit complete marks for review."}</p>
+      </div>
       <div className="row-actions">
         <button type="button" className="ghost no-print" onClick={printPage}>Print Reports</button>
         {canPrepareReports && <button type="button" onClick={() => void prepareReports()}>Prepare Reports</button>}
-        <button type="button" onClick={() => void load()}>Refresh</button>
+        <button type="button" onClick={() => void load()} disabled={academicsLoading}>{academicsLoading ? "Refreshing…" : "Refresh"}</button>
       </div>
-    </div>
+    </header>
     {scope && <WorkspaceScopePanel summary={scope} />}
-    <div className="summary-strip"><span>Current term: {termName}</span><span>{reviewQueue.length} awaiting review</span><span>{publishedCards.length} published report cards</span></div>
+    <div className="academic-context" aria-label="Academic term summary">
+      <article><span>Current cycle</span><strong>{termName}</strong><small>{config?.academicYears.find((year) => year.id === config.school.currentAcademicYearId)?.name ?? "Academic year not selected"}</small></article>
+      <article><span>Assessment work</span><strong>{openForMarks.length}</strong><small>open for marks entry</small></article>
+      <article><span>Review attention</span><strong>{reviewQueue.length}</strong><small>submitted for DOS review</small></article>
+      <article><span>Results shared</span><strong>{publishedCards.length}</strong><small>published report cards</small></article>
+    </div>
+    {academicsLoading && <div className="academic-loading" role="status">Loading academic records…</div>}
     {canUseReviewQueue && <section className="operation-panel marks-review-panel">
       <div className="section-heading">
         <div>
@@ -3062,7 +3101,7 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
         <span>Teachers can reopen returned rosters, correct scores, and submit again.</span>
       </div>}
     </section>}
-    {canEnterMarks && <section className="operation-panel marks-entry-panel">
+    {canEnterMarks && <section className="marks-entry-panel academic-surface">
       <div className="section-heading">
         <div>
           <p className="eyebrow">My assessments</p>
@@ -3070,17 +3109,17 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
           <p className="panel-copy">Choose an assigned assessment, enter scores against the official roster, save draft, then submit for DOS review.</p>
         </div>
         <div className="row-actions">
-          <button type="button" className="ghost" onClick={() => void loadMarksEntry(selectedAssessmentId)} disabled={!selectedAssessmentId || marksBusy}>Reload Roster</button>
-          <button type="button" className="ghost" onClick={() => void submitMarks("DRAFT")} disabled={!marksEntry || marksBusy || !selectedMarksEditable}>Save Draft</button>
-          <button type="button" onClick={() => void submitMarks("SUBMITTED")} disabled={!marksEntry || marksBusy || !selectedMarksEditable || Boolean(marksProgress?.invalid) || Boolean(marksProgress && marksProgress.entered < marksProgress.total)}>Submit for Review</button>
+          <button type="button" className="ghost" onClick={() => void loadMarksEntry(selectedAssessmentId)} disabled={!selectedAssessmentId || marksBusy}>Reload roster</button>
+          <button type="button" className="ghost" onClick={() => void submitMarks("DRAFT")} disabled={!marksEntry || marksBusy || !selectedMarksEditable}>{marksBusy ? "Saving…" : "Save draft"}</button>
+          <button type="button" onClick={() => void submitMarks("SUBMITTED")} disabled={!marksEntry || marksBusy || !selectedMarksEditable || Boolean(marksProgress?.invalid) || Boolean(marksProgress && marksProgress.entered < marksProgress.total)}>{marksBusy ? "Saving…" : "Submit for review"}</button>
         </div>
       </div>
       <div className="marks-entry-toolbar">
-        <label>Assessment<select value={selectedAssessmentId} onChange={(event) => void chooseMarksAssessment(event.target.value)}><option value="">Select assessment</option>{assessments.map((assessment) => <option key={assessment.id} value={assessment.id}>{assessment.name} - {assessment.subject?.name ?? "Subject"} ({assessment.status ?? "DRAFT"})</option>)}</select></label>
+        <label>Assessment<select value={selectedAssessmentId} onChange={(event) => void chooseMarksAssessment(event.target.value)}><option value="">Select an assigned assessment</option>{assessments.map((assessment) => <option key={assessment.id} value={assessment.id}>{assessment.name} — {assessment.subject?.name ?? "Subject"} ({(assessment.status ?? "DRAFT").replaceAll("_", " ")})</option>)}</select></label>
         <div className="marks-context-card">
           <strong>{marksEntry?.assessment?.name ?? "No assessment selected"}</strong>
           <span>{marksEntry?.assessment?.subject?.name ?? "Choose an assessment"}{marksEntry ? ` - ${assessmentPlacementLabel(config, marksEntry.assessment)}` : ""}</span>
-          <span>Max score: {marksEntry ? String(marksEntry.assessment.maxScore) : "Not selected"}</span>
+          <span>Maximum score: {marksEntry ? String(marksEntry.assessment.maxScore) : "Not selected"}</span>
         </div>
       </div>
       {marksProgress && <div className="marks-progress" aria-label="Marks entry progress">
@@ -3097,49 +3136,53 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
           <span>already saved</span>
         </div>
       </div>}
+      {marksEntry && <div className="marks-roster-tools"><label>Find learner<input type="search" value={marksSearch} onChange={(event) => setMarksSearch(event.target.value)} placeholder="Name or admission number" /></label><span>{marksProgress?.entered === marksProgress?.total ? "All scores are ready to submit." : "Draft scores are kept here until you submit for review."}</span></div>}
       <DataTable label="Teacher marks entry" compact>
         <thead><tr><th>Student</th><th>Saved</th><th>Score</th><th>Comment</th><th>State</th></tr></thead>
         <tbody>
-          {marksEntry?.students.map((student) => {
+          {visibleMarksStudents.map((student) => {
             const score = marksDraft[student.id]?.score ?? "";
-            const maxScore = Number(marksEntry.assessment.maxScore);
+            const maxScore = Number(marksEntry?.assessment.maxScore ?? 0);
             const numericScore = Number(score);
             const invalid = score.trim() !== "" && (!Number.isFinite(numericScore) || numericScore < 0 || numericScore > maxScore);
             return <tr key={student.id}>
             <td>{student.admissionNo}<br /><small>{student.firstName} {student.lastName}</small></td>
             <td>{student.mark?.score ?? "Not saved"}</td>
-            <td><input aria-label={`Score for ${student.firstName} ${student.lastName}`} className={invalid ? "compact-input invalid-input" : "compact-input"} type="number" min="0" max={maxScore} value={score} disabled={!selectedMarksEditable} onChange={(event) => updateMarkDraft(student.id, { score: event.target.value })} /></td>
+            <td><input aria-label={`Score for ${student.firstName} ${student.lastName}`} className={invalid ? "compact-input invalid-input" : "compact-input"} type="number" inputMode="decimal" min="0" max={maxScore} value={score} disabled={!selectedMarksEditable} onChange={(event) => updateMarkDraft(student.id, { score: event.target.value })} /></td>
             <td><input aria-label={`Comment for ${student.firstName} ${student.lastName}`} value={marksDraft[student.id]?.teacherComment ?? ""} disabled={!selectedMarksEditable} onChange={(event) => updateMarkDraft(student.id, { teacherComment: event.target.value })} placeholder="Optional note" /></td>
             <td><span className={invalid ? "pill danger-pill" : score ? "pill" : "pill muted-pill"}>{invalid ? `0-${maxScore} only` : student.mark?.status ?? (score ? "Unsaved" : "Empty")}</span></td>
           </tr>;
           })}
           {!marksEntry && <tr><td colSpan={5} className="empty">Select an assigned assessment to enter marks.</td></tr>}
           {marksEntry && marksEntry.students.length === 0 && <tr><td colSpan={5} className="empty">No active students are available for this assessment roster.</td></tr>}
+          {marksEntry && marksEntry.students.length > 0 && visibleMarksStudents.length === 0 && <tr><td colSpan={5} className="empty">No learner matches that search. Clear the search to see the full roster.</td></tr>}
         </tbody>
       </DataTable>
     </section>}
-    {canManageAcademics && <div className="workflow-grid">
+    {canManageAcademics && <section className="academic-setup-area">
+      <div className="section-heading"><div><p className="eyebrow">Academic setup</p><h3>Examinations and assessments</h3><p className="panel-copy">Create work for the current academic cycle. Required information is marked and remains editable before marks are submitted.</p></div></div>
+      <div className="workflow-grid">
       <form className="workflow-panel" onSubmit={(event) => void createExam(event)}>
-        <div><h4>Create Examination</h4><p className="panel-copy">Open an exam window for marks, review, and reports.</p></div>
-        <input placeholder="Exam name" value={examForm.name} onChange={(event) => setExamForm({ ...examForm, name: event.target.value })} required />
-        <select value={examForm.examinationType} onChange={(event) => setExamForm({ ...examForm, examinationType: event.target.value })}><option>End of Term</option><option>Mid Term</option><option>Mock Examination</option><option>Continuous Assessment</option></select>
-        <div className="two-field-row"><input type="date" value={examForm.startsAt} onChange={(event) => setExamForm({ ...examForm, startsAt: event.target.value })} /><input type="date" value={examForm.endsAt} onChange={(event) => setExamForm({ ...examForm, endsAt: event.target.value })} /></div>
-        <select value={examForm.status} onChange={(event) => setExamForm({ ...examForm, status: event.target.value })}>{["DRAFT", "OPEN", "MARKS_ENTRY", "UNDER_REVIEW"].map((status) => <option key={status}>{status}</option>)}</select>
-        <textarea placeholder="Description" value={examForm.description} onChange={(event) => setExamForm({ ...examForm, description: event.target.value })} />
-        <button type="submit">Create Exam</button>
+        <div><h4>Create examination</h4><p className="panel-copy">Open an exam window for marks, review, and reports.</p></div>
+        <label>Examination name <span aria-hidden="true">*</span><input placeholder="e.g. Term 1 mid-term" value={examForm.name} onChange={(event) => setExamForm({ ...examForm, name: event.target.value })} required /></label>
+        <label>Examination type<select value={examForm.examinationType} onChange={(event) => setExamForm({ ...examForm, examinationType: event.target.value })}><option>End of Term</option><option>Mid Term</option><option>Mock Examination</option><option>Continuous Assessment</option></select></label>
+        <div className="two-field-row"><label>Starts <span aria-hidden="true">*</span><input type="date" value={examForm.startsAt} onChange={(event) => setExamForm({ ...examForm, startsAt: event.target.value })} required /></label><label>Ends <span aria-hidden="true">*</span><input type="date" value={examForm.endsAt} onChange={(event) => setExamForm({ ...examForm, endsAt: event.target.value })} required /></label></div>
+        <label>Workflow state<select value={examForm.status} onChange={(event) => setExamForm({ ...examForm, status: event.target.value })}>{["DRAFT", "OPEN", "MARKS_ENTRY", "UNDER_REVIEW"].map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}</select></label>
+        <label>Description <textarea placeholder="Optional internal context" value={examForm.description} onChange={(event) => setExamForm({ ...examForm, description: event.target.value })} /></label>
+        <button type="submit" disabled={examSubmitting}>{examSubmitting ? "Creating examination…" : "Create examination"}</button>
       </form>
       <form className="workflow-panel" onSubmit={(event) => void createAssessment(event)}>
-        <div><h4>Create Assessment</h4><p className="panel-copy">Attach a subject, class, teacher, weighting, and pass mark.</p></div>
-        <select value={assessmentForm.examinationId} onChange={(event) => setAssessmentForm({ ...assessmentForm, examinationId: event.target.value })}><option value="">Select exam</option>{exams.map((exam) => <option key={exam.id} value={exam.id}>{exam.name}</option>)}</select>
-        <select value={assessmentForm.subjectId} onChange={(event) => setAssessmentForm({ ...assessmentForm, subjectId: event.target.value })}><option value="">Select subject</option>{config?.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select>
-        <select value={assessmentForm.classId} onChange={(event) => setAssessmentForm({ ...assessmentForm, classId: event.target.value, streamId: config?.classes.find((klass) => klass.id === event.target.value)?.streams[0]?.id ?? "" })}><option value="">Select class</option>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select>
-        <select value={assessmentForm.streamId} onChange={(event) => setAssessmentForm({ ...assessmentForm, streamId: event.target.value })}><option value="">All streams</option>{config?.classes.find((klass) => klass.id === assessmentForm.classId)?.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select>
-        <select value={assessmentForm.teacherId} onChange={(event) => setAssessmentForm({ ...assessmentForm, teacherId: event.target.value })}><option value="">No teacher assigned</option>{config?.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.staffId} - {teacher.firstName} {teacher.lastName}</option>)}</select>
-        <input placeholder="Assessment name" value={assessmentForm.name} onChange={(event) => setAssessmentForm({ ...assessmentForm, name: event.target.value })} required />
-        <div className="three-field-row"><input type="number" placeholder="Max" value={assessmentForm.maxScore} onChange={(event) => setAssessmentForm({ ...assessmentForm, maxScore: event.target.value })} /><input type="number" placeholder="Weight" value={assessmentForm.weight} onChange={(event) => setAssessmentForm({ ...assessmentForm, weight: event.target.value })} /><input type="number" placeholder="Pass" value={assessmentForm.passMark} onChange={(event) => setAssessmentForm({ ...assessmentForm, passMark: event.target.value })} /></div>
-        <button type="submit">Create Assessment</button>
+        <div><h4>Create assessment</h4><p className="panel-copy">Attach a subject, class, teacher, weighting, and pass mark.</p></div>
+        <label>Examination <span aria-hidden="true">*</span><select value={assessmentForm.examinationId} onChange={(event) => setAssessmentForm({ ...assessmentForm, examinationId: event.target.value })} required><option value="">Select examination</option>{exams.map((exam) => <option key={exam.id} value={exam.id}>{exam.name}</option>)}</select></label>
+        <label>Subject <span aria-hidden="true">*</span><select value={assessmentForm.subjectId} onChange={(event) => setAssessmentForm({ ...assessmentForm, subjectId: event.target.value })} required><option value="">Select subject</option>{config?.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
+        <div className="two-field-row"><label>Class <span aria-hidden="true">*</span><select value={assessmentForm.classId} onChange={(event) => setAssessmentForm({ ...assessmentForm, classId: event.target.value, streamId: config?.classes.find((klass) => klass.id === event.target.value)?.streams[0]?.id ?? "" })} required><option value="">Select class</option>{config?.classes.map((klass) => <option key={klass.id} value={klass.id}>{klass.name}</option>)}</select></label><label>Stream<select value={assessmentForm.streamId} onChange={(event) => setAssessmentForm({ ...assessmentForm, streamId: event.target.value })}><option value="">All streams</option>{config?.classes.find((klass) => klass.id === assessmentForm.classId)?.streams.map((stream) => <option key={stream.id} value={stream.id}>{stream.name}</option>)}</select></label></div>
+        <label>Assigned teacher<select value={assessmentForm.teacherId} onChange={(event) => setAssessmentForm({ ...assessmentForm, teacherId: event.target.value })}><option value="">No teacher assigned</option>{config?.teachers?.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.firstName} {teacher.lastName}</option>)}</select></label>
+        <label>Assessment name <span aria-hidden="true">*</span><input placeholder="e.g. Algebra practice" value={assessmentForm.name} onChange={(event) => setAssessmentForm({ ...assessmentForm, name: event.target.value })} required /></label>
+        <div className="three-field-row"><label>Maximum score <span aria-hidden="true">*</span><input type="number" min="1" placeholder="100" value={assessmentForm.maxScore} onChange={(event) => setAssessmentForm({ ...assessmentForm, maxScore: event.target.value })} required /></label><label>Weight (%) <span aria-hidden="true">*</span><input type="number" min="1" max="100" placeholder="100" value={assessmentForm.weight} onChange={(event) => setAssessmentForm({ ...assessmentForm, weight: event.target.value })} required /></label><label>Pass mark<input type="number" min="0" placeholder="Optional" value={assessmentForm.passMark} onChange={(event) => setAssessmentForm({ ...assessmentForm, passMark: event.target.value })} /></label></div>
+        <button type="submit" disabled={assessmentSubmitting}>{assessmentSubmitting ? "Creating assessment…" : "Create assessment"}</button>
       </form>
-    </div>}
+      </div>
+    </section>}
     <DataTable label="Examinations"><thead><tr><th>Exam</th><th>Type</th><th>Status</th><th>Window</th><th>Assessments</th></tr></thead><tbody>
       {exams.map((exam) => <tr key={exam.id}><td>{exam.name}</td><td>{exam.examinationType ?? "-"}</td><td><span className="pill">{exam.status ?? "-"}</span></td><td>{dateOnly(exam.startsAt)} - {dateOnly(exam.endsAt)}</td><td>{exam.assessments?.length ?? 0}</td></tr>)}
       {exams.length === 0 && <tr><td colSpan={5} className="empty">No examinations created yet.</td></tr>}
@@ -3155,6 +3198,15 @@ function AcademicsAdminView({ api, config, session, scope, setMessage }: { api: 
       {cards.slice(0, 20).map((card) => <tr key={card.id}><td>{card.student?.firstName ?? ""} {card.student?.lastName ?? ""}</td><td>{card.grade}</td><td>{String(card.averageScore)}</td><td><span className="pill">{card.status}</span></td><td>{canPublishReports && card.status === "PREPARED" ? <button type="button" onClick={() => void publishReport(card.id)}>Approve & Publish</button> : "-"}</td></tr>)}
       {cards.length === 0 && <tr><td colSpan={5} className="empty">No report cards to display.</td></tr>}
     </tbody></DataTable>
+    {publishedCards[0] && <section className="report-card-showcase">
+      <div className="section-heading no-print"><div><p className="eyebrow">Published report card</p><h3>Family-ready progress summary</h3><p className="panel-copy">This preview uses the first published record in the current academic workspace. Print removes navigation and controls for a clean A4 result.</p></div><button type="button" onClick={printPage}>Print report card</button></div>
+      <article className="report-card-sheet" aria-label="Published report card preview">
+        <header><div className="report-card-mark">A</div><div><p>{config?.school.name ?? "Aethina School"}</p><h2>Student academic report</h2><span>{config?.academicYears.find((year) => year.id === config?.school.currentAcademicYearId)?.name ?? "Academic year"} · {termName}</span></div><strong>Published</strong></header>
+        <div className="report-card-identifiers"><div><span>Learner</span><strong>{publishedCards[0].student?.firstName} {publishedCards[0].student?.lastName}</strong></div><div><span>Class</span><strong>{publishedCards[0].student?.currentClass?.name ?? "Class"}{publishedCards[0].student?.currentStream?.name ? ` · ${publishedCards[0].student.currentStream.name}` : ""}</strong></div><div><span>Result</span><strong>{publishedCards[0].grade} · {String(publishedCards[0].averageScore)}%</strong></div></div>
+        <table className="report-result-table"><thead><tr><th>Subject</th><th>Score</th><th>Grade</th><th>Teacher note</th></tr></thead><tbody>{asArray<any>(publishedCards[0].subjectResults).map((result, index) => <tr key={`${result.subject}-${index}`}><td>{result.subject ?? "Subject"}</td><td>{result.score ?? "—"}</td><td>{result.grade ?? "—"}</td><td>{result.comment ?? "—"}</td></tr>)}{asArray<any>(publishedCards[0].subjectResults).length === 0 && <tr><td colSpan={4}>Subject results are not available for this published record.</td></tr>}</tbody></table>
+        <footer><div><span>Overall grade</span><strong>{publishedCards[0].grade}</strong></div><div><span>Remark</span><strong>{publishedCards[0].remarks ?? "No additional remark recorded."}</strong></div><div><span>Issued</span><strong>{publishedCards[0].publishedAt ? dateOnly(publishedCards[0].publishedAt) : "Published"}</strong></div></footer>
+      </article>
+    </section>}
   </section>;
 }
 

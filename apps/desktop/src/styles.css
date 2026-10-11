@@ -30,6 +30,7 @@
 body {
   margin: 0;
   min-width: 320px;
+  overflow-x: hidden;
 }
 
 button,
@@ -2358,6 +2359,291 @@ small {
   }
 }
 
+/* UI-B: academic office, teaching workflow, and report-card presentation */
+.academic-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  min-width: 0;
+}
+
+.academic-command,
+.academic-surface,
+.academic-setup-area,
+.report-card-showcase {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.academic-command {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 23px 24px;
+  border-top: 3px solid var(--aethina-gold);
+}
+
+.academic-command h3,
+.academic-setup-area h3,
+.report-card-showcase h3 {
+  margin: 4px 0 7px;
+  font-size: clamp(22px, 2.4vw, 30px);
+  letter-spacing: -.035em;
+}
+
+.academic-command .panel-copy {
+  max-width: 690px;
+  margin: 0;
+}
+
+.academic-context {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.academic-context article {
+  display: grid;
+  gap: 5px;
+  min-height: 112px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.academic-context article:first-child {
+  background: #fbf7ef;
+}
+
+.academic-context span,
+.academic-context small,
+.marks-roster-tools span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.academic-context strong {
+  color: var(--ink);
+  font-size: 24px;
+  letter-spacing: -.04em;
+}
+
+.academic-loading {
+  padding: 12px 15px;
+  border: 1px dashed #ceb67f;
+  border-radius: 10px;
+  background: #fdf9ee;
+  color: #765a24;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.marks-entry-panel {
+  padding: 22px;
+}
+
+.marks-entry-panel .section-heading,
+.marks-review-panel .section-heading {
+  align-items: flex-start;
+}
+
+.marks-entry-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, .8fr) minmax(320px, 1.2fr);
+  gap: 14px;
+  margin: 18px 0 12px;
+}
+
+.marks-entry-toolbar label,
+.marks-roster-tools label,
+.workflow-panel > label,
+.two-field-row > label,
+.three-field-row > label {
+  display: grid;
+  gap: 6px;
+  color: #514e47;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.marks-entry-toolbar select,
+.marks-roster-tools input,
+.workflow-panel input,
+.workflow-panel select,
+.workflow-panel textarea {
+  width: 100%;
+}
+
+.marks-context-card {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid #eadbbd;
+  border-radius: 11px;
+  background: #fdf9ee;
+}
+
+.marks-context-card strong { font-size: 14px; }
+.marks-context-card span { color: #665f53; font-size: 12px; }
+
+.marks-progress {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 14px 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fbfaf7;
+}
+
+.marks-progress > div { padding: 12px 16px; border-right: 1px solid var(--line); }
+.marks-progress > div:last-child { border-right: 0; }
+.marks-progress strong { color: var(--ink); font-size: 18px; }
+.marks-progress span { color: var(--muted); font-size: 11px; font-weight: 650; }
+
+.marks-roster-tools {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 16px 0 10px;
+}
+
+.marks-roster-tools label { width: min(100%, 310px); }
+.marks-roster-tools span { padding-bottom: 10px; text-align: right; }
+
+.marks-entry-panel .data-table { margin: 0; }
+.marks-entry-panel table { min-width: 780px; }
+.marks-entry-panel td:first-child { min-width: 180px; }
+.marks-entry-panel td:nth-child(4) { min-width: 200px; }
+.marks-entry-panel input.compact-input { min-width: 86px; }
+.marks-entry-panel .invalid-input { border-color: var(--danger); background: #fff5f2; }
+
+.academic-setup-area { padding: 22px; }
+.academic-setup-area > .section-heading { margin-bottom: 16px; }
+.workflow-grid { align-items: start; }
+.workflow-panel { gap: 13px; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+.workflow-panel h4 { margin: 0 0 5px; font-size: 17px; }
+.workflow-panel .panel-copy { margin: 0; }
+.workflow-panel button { margin-top: 4px; }
+
+.marks-review-panel { border-top: 3px solid var(--aethina-gold); }
+.workflow-steps { margin: 16px 0; }
+.workflow-steps span { background: #f5f2eb; color: #6f695e; }
+.workflow-steps span.active { background: var(--charcoal); color: #fffdf8; }
+.review-comment textarea { background: var(--surface-soft); }
+
+.report-card-showcase { padding: 22px; }
+.report-card-showcase > .section-heading { margin-bottom: 18px; }
+.report-card-sheet {
+  width: min(100%, 840px);
+  min-height: 720px;
+  margin: 0 auto;
+  padding: 42px;
+  border: 1px solid #cfc8bb;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(36, 32, 23, .09);
+}
+
+.report-card-sheet header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 15px;
+  padding-bottom: 22px;
+  border-bottom: 2px solid var(--charcoal);
+}
+
+.report-card-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--charcoal);
+  color: #f5dfad;
+  font-family: Georgia, serif;
+  font-size: 27px;
+  font-weight: 700;
+}
+
+.report-card-sheet header p { margin: 0; color: #6a624f; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.report-card-sheet header h2 { margin: 4px 0; color: #1f211f; font-size: 25px; letter-spacing: -.035em; }
+.report-card-sheet header span { color: #70695d; font-size: 12px; }
+.report-card-sheet header > strong { padding: 6px 10px; border: 1px solid #a8cab8; border-radius: 999px; background: #eff8f2; color: #26744f; font-size: 11px; }
+
+.report-card-identifiers {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 12px;
+  margin: 24px 0;
+}
+.report-card-identifiers div { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid #ded8cc; }
+.report-card-identifiers span,
+.report-card-sheet footer span { color: #71695d; font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.report-card-identifiers strong { font-size: 14px; }
+
+.report-result-table { width: 100%; border-collapse: collapse; }
+.report-result-table th { padding: 10px 9px; background: #f3efe6; color: #554e42; font-size: 10px; text-align: left; text-transform: uppercase; }
+.report-result-table td { padding: 11px 9px; border-bottom: 1px solid #e4dfd6; font-size: 13px; }
+.report-card-sheet footer { display: grid; grid-template-columns: .7fr 1.8fr .8fr; gap: 16px; margin-top: 26px; padding-top: 16px; border-top: 1px solid #cfc8bb; }
+.report-card-sheet footer div { display: grid; gap: 5px; }
+.report-card-sheet footer strong { font-size: 12px; }
+
+.timetable-command { border-top: 3px solid var(--aethina-gold); }
+.weekly-timetable { gap: 12px; }
+.timetable-day-card { border-color: var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-soft); }
+.timetable-day-card h4 { padding-bottom: 9px; border-bottom: 1px solid var(--line); }
+.lesson-card { border: 1px solid #eadfcb; border-radius: 9px; background: #fffcf6; }
+.lesson-card strong { color: var(--ink); }
+
+@media (max-width: 900px) {
+  .academic-context { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .academic-command { flex-direction: column; }
+  .academic-command .row-actions { width: 100%; }
+  .marks-entry-toolbar { grid-template-columns: 1fr; }
+  .report-card-sheet { padding: 28px; }
+}
+
+@media (max-width: 620px) {
+  .academic-workspace { gap: 14px; }
+  .academic-command, .marks-entry-panel, .academic-setup-area, .report-card-showcase { padding: 16px; }
+  .academic-context { grid-template-columns: 1fr 1fr; gap: 9px; }
+  .academic-context article { min-height: 94px; padding: 12px; }
+  .academic-context strong { font-size: 21px; }
+  .marks-progress { grid-template-columns: 1fr; }
+  .marks-progress > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .marks-progress > div:last-child { border-bottom: 0; }
+  .marks-roster-tools { align-items: stretch; flex-direction: column; }
+  .marks-roster-tools label { width: 100%; }
+  .marks-roster-tools span { padding: 0; text-align: left; }
+  .marks-entry-panel .data-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .workflow-panel { padding: 16px; }
+  .report-card-sheet { min-height: auto; padding: 20px; }
+  .report-card-sheet header { grid-template-columns: auto 1fr; }
+  .report-card-sheet header > strong { grid-column: 1 / -1; justify-self: start; }
+  .report-card-identifiers, .report-card-sheet footer { grid-template-columns: 1fr; gap: 6px; }
+  .report-result-table { font-size: 11px; }
+  .report-result-table th, .report-result-table td { padding: 8px 6px; }
+}
+
+@media print {
+  body { background: #fff !important; }
+  .academic-workspace > :not(.report-card-showcase),
+  .report-card-showcase > .section-heading,
+  .report-card-showcase ~ * { display: none !important; }
+  .report-card-showcase { display: block !important; padding: 0; border: 0; box-shadow: none; }
+  .report-card-sheet { width: 100%; min-height: 0; padding: 0; border: 0; box-shadow: none; }
+  .report-result-table tr { break-inside: avoid; page-break-inside: avoid; }
+}
+
 /* UI-A: shared staff workspace foundations */
 :root {
   --aethina-gold: #a87522;
@@ -2436,6 +2722,7 @@ textarea::placeholder {
 .app-shell {
   grid-template-columns: 276px minmax(0, 1fr);
   background: var(--page);
+  overflow-x: clip;
   transition: grid-template-columns .2s ease;
 }
 
