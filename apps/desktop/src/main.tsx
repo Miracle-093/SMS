@@ -19,7 +19,7 @@ import {
 } from "./offline-store.js";
 import { apiBaseUrl } from "./config.js";
 import { TeacherAttendanceKiosk } from "./teacher-attendance-kiosk.js";
-import { AppNotice, AppRequestError, PermissionDeniedState, UserIdentity, errorForResponse, toUserFacingError, userMessage, type UserFacingError } from "./ui.js";
+import { AppNotice, AppRequestError, PermissionDeniedState, UserIdentity, authenticatedHeaders, errorForResponse, restoreStoredSession, serializeStoredSession, shouldClearSession, toUserFacingError, userMessage, type UserFacingError } from "./ui.js";
 import "./styles.css";
 
 const deviceId = "00000000-0000-4000-8000-000000000001";
@@ -349,7 +349,7 @@ const emptyForm: RegistrationForm = {
 };
 
 function App() {
-  const [session, setSession] = useState<Session | null>(() => readJson<Session | null>("aethina.session", null));
+  const [session, setSession] = useState<Session | null>(() => restoreStoredSession<Session>(localStorage.getItem("aethina.session")));
   const [activeView, setActiveView] = useState<ActiveView>(initialWorkspaceView);
   const [config, setConfig] = useState<SchoolConfig | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
@@ -456,15 +456,16 @@ function App() {
       throw new Error("Login failed");
     }
     const nextSession = await response.json();
-    localStorage.setItem("aethina.session", JSON.stringify(nextSession));
+    localStorage.setItem("aethina.session", serializeStoredSession(nextSession));
     setSession(nextSession);
   }
 
-  function logout() {
+  function logout(notice?: UserFacingError) {
     localStorage.removeItem("aethina.session");
     setSession(null);
     setStudents([]);
     setConfig(null);
+    setErrorNotice(notice ?? null);
   }
 
   async function refreshAll() {
@@ -502,10 +503,14 @@ function App() {
     if (!session) throw new Error("Not signed in");
     const response = await fetch(`${apiBaseUrl}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}`, ...(init?.headers ?? {}) }
+      headers: authenticatedHeaders(session.accessToken, init?.headers)
     });
     if (!response.ok) {
-      throw errorForResponse(response.status, await response.text());
+      const error = errorForResponse(response.status, await response.text());
+      if (shouldClearSession(error)) {
+        logout(toUserFacingError(error));
+      }
+      throw error;
     }
     return response.json();
   }
@@ -639,7 +644,7 @@ function App() {
   }, []);
 
   if (!session) {
-    return <LoginScreen onLogin={login} />;
+    return <LoginScreen onLogin={login} notice={errorNotice?.message} />;
   }
 
   return (
@@ -666,7 +671,7 @@ function App() {
         </div>
         <div className="sidebar-footer">
           <button className="sidebar-collapse" type="button" aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}>{sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}</button>
-          <button className="sidebar-signout" type="button" onClick={logout}>Sign out</button>
+          <button className="sidebar-signout" type="button" onClick={() => logout()}>Sign out</button>
         </div>
       </aside>
 
@@ -678,7 +683,7 @@ function App() {
             <strong>{viewTitle(activeView)}</strong>
             <span>{roleWorkspaceName} · {session.user.displayName}</span>
           </div>
-          <button className="mobile-account-button" type="button" onClick={logout}>Sign out</button>
+          <button className="mobile-account-button" type="button" onClick={() => logout()}>Sign out</button>
         </header>
         <header className="topbar">
           <div>
@@ -863,7 +868,7 @@ function App() {
   );
 }
 
-function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) => Promise<void> }) {
+function LoginScreen({ onLogin, notice }: { onLogin: (email: string, password: string) => Promise<void>; notice?: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -873,6 +878,7 @@ function LoginScreen({ onLogin }: { onLogin: (email: string, password: string) =
         <p className="eyebrow">Satelite Secondary</p>
         <h1>Sign in</h1>
         <p className="login-copy">Use the school-issued staff account assigned to your role. Your available workspace is determined after sign-in.</p>
+        {notice && <AppNotice error={{ message: notice }} />}
         <label>Email<input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
         <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
         {error && <p className="error">{error}</p>}
@@ -3389,14 +3395,6 @@ function InvoiceTable({ invoices }: { invoices: InvoiceRecord[] }) {
 
 function FinanceTable({ headings, rows, compact = false }: { headings: string[]; rows: Array<Array<React.ReactNode>>; compact?: boolean }) {
   return <DataTable label={headings.join(", ")} compact={compact}><thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{rows.length === 0 && <tr><td colSpan={headings.length} className="empty">No records to display.</td></tr>}</tbody></DataTable>;
-}
-
-function readJson<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(localStorage.getItem(key) ?? "") as T;
-  } catch {
-    return fallback;
-  }
 }
 
 function asArray<T>(value: unknown): T[] {

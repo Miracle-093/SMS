@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json && vite build",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "test": "tsc -p tsconfig.json --noEmit"
+    "test": "tsc -p tsconfig.json --noEmit && vitest run"
   },
   "dependencies": {
     "@aethina/shared-types": "0.1.0",
