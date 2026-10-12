@@ -20,19 +20,17 @@ type PortalHome = {
 
 const primaryViews = ["home", "academics", "finance", "timetable", "more"] as const;
 const loadableViews = ["home", "academics", "finance", "timetable", "announcements", "notifications"] as const;
+const portalViews = [...loadableViews, "more"] as const;
 
 type LoadableView = (typeof loadableViews)[number];
 type StudentIdentity = PortalHome["student"];
 type TableColumn<T> = { heading: string; render: (row: T) => React.ReactNode; align?: "right" };
-const demoMode = import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === "true";
-const demoUsername = "sat-s1-001";
-const demoPassword = "StudentPass123";
-
 function PortalApp() {
   const [session, setSession] = useState<Session | null>(() => readJson("aethina.portal.session", null));
-  const [username, setUsername] = useState(demoMode ? demoUsername : "");
-  const [password, setPassword] = useState(demoMode ? demoPassword : "");
-  const [active, setActive] = useState("home");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [active, setActive] = useState(readPortalView);
   const [home, setHome] = useState<PortalHome | null>(null);
   const [academics, setAcademics] = useState<any>(null);
   const [finance, setFinance] = useState<any>(null);
@@ -55,6 +53,12 @@ function PortalApp() {
     void refresh(session.accessToken, active);
   }, [session, active]);
 
+  useEffect(() => {
+    const onHashChange = () => setActive(readPortalView());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
   const unread = useMemo(() => notifications.filter((item) => !item.readAt).length, [notifications]);
 
   async function login(event: React.FormEvent) {
@@ -65,7 +69,7 @@ function PortalApp() {
       const nextSession = await api<Session>("/auth/portal-login", null, { method: "POST", body: { username, password } });
       localStorage.setItem("aethina.portal.session", JSON.stringify(nextSession));
       setSession(nextSession);
-      setActive("home");
+      navigate("home");
     } catch (err) {
       setError(readableError(err));
     } finally {
@@ -79,6 +83,9 @@ function PortalApp() {
     try {
       const loadableView = loadableViews.includes(view as LoadableView) ? view as LoadableView : null;
       if (loadableView) setViewErrors((current) => ({ ...current, [loadableView]: null }));
+      if (!home && view !== "home") {
+        setHome(await api<PortalHome>("/portal/home", token));
+      }
       if (view === "home") {
         setHome(await api<PortalHome>("/portal/home", token));
         setNotifications(await api<any[]>("/portal/notifications", token));
@@ -108,6 +115,13 @@ function PortalApp() {
     setHome(null);
     setViewErrors({});
     setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    setPassword("");
+  }
+
+  function navigate(view: string) {
+    const next = portalViews.includes(view as (typeof portalViews)[number]) ? view : "home";
+    window.location.hash = next === "home" ? "" : next;
+    setActive(next);
   }
 
   function expireSession(issue: PortalIssue) {
@@ -170,9 +184,10 @@ function PortalApp() {
           <p className="eyebrow">Satelite Secondary</p>
           <h1>Student Portal</h1>
           <p className="slogan">Student Portal workspace for families and learners.</p>
-          {demoMode && <div className="demo-strip">Demo mode: credentials are filled in for local testing.</div>}
-          <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
-          <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
+          <label>Admission number or username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label>
+          <label>Password
+            <span className="password-input"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /><button type="button" className="password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "Hide" : "Show"}</button></span>
+          </label>
           <AlertMessage issue={error} title="Sign-in issue" />
           <button type="submit" disabled={loading} aria-busy={loading}>{loading ? "Signing in..." : "Sign in"}</button>
         </form>
@@ -236,7 +251,7 @@ function PortalApp() {
         </div>
         <nav aria-label="Student portal navigation">
         {["home", "academics", "finance", "timetable", "announcements", "notifications"].map((view) => (
-          <button key={view} type="button" className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => setActive(view)}>
+          <button key={view} type="button" className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => navigate(view)}>
             {view === "notifications" && unread ? `Notifications (${unread})` : title(view)}
           </button>
         ))}
@@ -259,11 +274,11 @@ function PortalApp() {
         {active === "timetable" && (viewErrors.timetable && !loading ? <LoadFailed title="Timetable unavailable" issue={viewErrors.timetable} onRetry={() => void refresh(session.accessToken, "timetable")} /> : <TimetableView rows={timetable.length ? timetable : home?.timetable ?? []} />)}
         {active === "announcements" && (viewErrors.announcements && !loading ? <LoadFailed title="Announcements unavailable" issue={viewErrors.announcements} onRetry={() => void refresh(session.accessToken, "announcements")} /> : <FeedView title="Announcements" rows={announcements.length ? announcements : home?.announcements ?? []} kind="announcements" />)}
         {active === "notifications" && (viewErrors.notifications && !loading ? <LoadFailed title="Notifications unavailable" issue={viewErrors.notifications} onRetry={() => void refresh(session.accessToken, "notifications")} /> : <FeedView title="Notifications" rows={notifications.length ? notifications : home?.notifications ?? []} kind="notifications" onMarkRead={(id) => void markNotificationRead(id)} />)}
-        {active === "more" && <MoreView setActive={setActive} logout={logout} unread={unread} />}
+        {active === "more" && <MoreView setActive={navigate} logout={logout} unread={unread} student={studentIdentity} />}
       </section>
       <nav className="bottom-nav" aria-label="Primary portal navigation">
         {primaryViews.map((view) => (
-          <button key={view} type="button" className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => setActive(view)}>
+          <button key={view} type="button" className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => navigate(view)}>
             {view === "more" && unread ? `More (${unread})` : title(view)}
           </button>
         ))}
@@ -467,14 +482,22 @@ function TimetableView({ rows }: { rows: any[] }) {
   );
 }
 
-function MoreView({ setActive, logout, unread }: { setActive: (view: string) => void; logout: () => void; unread: number }) {
+function MoreView({ setActive, logout, unread, student }: { setActive: (view: string) => void; logout: () => void; unread: number; student?: StudentIdentity }) {
   return (
-    <section>
-      <h2>More</h2>
+    <section className="account-view">
+      <SectionTitle eyebrow="Account" title="Portal account" helper="You are viewing information for this learner." />
+      <article className="panel account-summary">
+        <p className="eyebrow">Student identity</p>
+        <h3>{student ? `${student.firstName} ${student.lastName}` : "Student portal"}</h3>
+        <dl className="detail-list">
+          <div><dt>Admission number</dt><dd>{student?.admissionNo ?? "Loading"}</dd></div>
+          <div><dt>Class</dt><dd>{[student?.currentClass?.name, student?.currentStream?.name].filter(Boolean).join(" ") || "Not assigned"}</dd></div>
+        </dl>
+      </article>
       <div className="more-grid">
         <button type="button" onClick={() => setActive("announcements")}>Announcements</button>
         <button type="button" onClick={() => setActive("notifications")}>Notifications{unread ? ` (${unread})` : ""}</button>
-        <button type="button" onClick={logout}>Logout</button>
+        <button type="button" onClick={logout}>Sign out safely</button>
       </div>
     </section>
   );
@@ -679,8 +702,8 @@ function title(value: string) {
 }
 
 function readableError(error: unknown): PortalIssue {
-  if (error instanceof PortalApiError) return { message: error.message, details: error.details };
-  if (error instanceof Error) return { message: "Something went wrong. Please try again.", details: error.message };
+  if (error instanceof PortalApiError) return { message: error.message };
+  if (error instanceof Error) return { message: "Something went wrong. Please try again." };
   return { message: "Something went wrong. Please try again." };
 }
 
@@ -694,6 +717,11 @@ function readJson<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function readPortalView() {
+  const requested = window.location.hash.replace(/^#/, "");
+  return portalViews.includes(requested as (typeof portalViews)[number]) ? requested : "home";
 }
 
 type RootElement = HTMLElement & { __aethinaRoot?: ReturnType<typeof createRoot> };

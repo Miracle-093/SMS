@@ -11,12 +11,6 @@ export function AlertMessage({ issue, title = "We could not complete that reques
     <section className="alert-message" role="alert">
       <strong>{title}</strong>
       <p>{issue.message}</p>
-      {issue.details && (
-        <details>
-          <summary>Technical details</summary>
-          <pre>{issue.details}</pre>
-        </details>
-      )}
     </section>
   );
 }
@@ -52,12 +46,6 @@ export function LoadFailed({ title, issue, onRetry }: { title: string; issue?: P
       <p className="eyebrow">Connection</p>
       <h2>{title}</h2>
       <p>{issue?.message ?? "The portal could not load this section. Check the connection and try again."}</p>
-      {issue?.details && (
-        <details>
-          <summary>Technical details</summary>
-          <pre>{issue.details}</pre>
-        </details>
-      )}
       <button type="button" onClick={onRetry}>Retry</button>
     </section>
   );
