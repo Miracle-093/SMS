@@ -236,12 +236,12 @@ function PortalApp() {
       <header className="mobile-top clean-mobile-top">
         <div>
           <strong>Satelite Secondary</strong>
-          <span>{studentDisplayName} - {workspaceIdentity}</span>
+          <span>{workspaceIdentity}</span>
         </div>
-        <button className="text-button" type="button" onClick={logout}>Logout</button>
+        <button className="text-button" type="button" onClick={logout}>Sign out</button>
       </header>
       <aside>
-        <div className="school-mark" aria-hidden="true">SS</div>
+        <div className="school-mark" aria-label="Satelite Secondary School crest"><span>Satelite</span><strong>Secondary</strong></div>
         <h1>Satelite</h1>
         <p>Secondary School</p>
         <div className="identity-card">
@@ -262,7 +262,7 @@ function PortalApp() {
         <header className="workspace-bar">
           <div>
             <p className="eyebrow">{workspaceIdentity}</p>
-            <h2>{studentDisplayName}</h2>
+            <h2>{title(active)}</h2>
           </div>
           <span>Satelite Secondary School</span>
         </header>
@@ -279,7 +279,7 @@ function PortalApp() {
       <nav className="bottom-nav" aria-label="Primary portal navigation">
         {primaryViews.map((view) => (
           <button key={view} type="button" className={active === view ? "active" : ""} aria-current={active === view ? "page" : undefined} onClick={() => navigate(view)}>
-            {view === "more" && unread ? `More (${unread})` : title(view)}
+            {mobileNavLabel(view, unread)}
           </button>
         ))}
       </nav>
@@ -301,19 +301,18 @@ function HomeView({ home }: { home: PortalHome | null }) {
           <div className="student-chips">
             <span>{home.student.currentClass?.name ?? "Class pending"}</span>
             <span>{home.student.currentStream?.name ?? "Stream pending"}</span>
-            <span>Student Portal</span>
           </div>
         </div>
-        <div className={home.finance.balance > 0 ? "hero-panel owing" : "hero-panel settled"}>
+        <div className={home.finance.balance > 0 ? "hero-panel balance" : "hero-panel settled"}>
           <span>Fee balance</span>
           <strong>{ugx(home.finance.balance)}</strong>
           <small>{home.finance.balance > 0 ? `${ugx(home.finance.paid)} paid so far` : "Fees currently settled"}</small>
         </div>
       </header>
       <section className="stats">
-        <Metric label="Fee balance" value={ugx(home.finance.balance)} danger={home.finance.balance > 0} />
+        <Metric label="Fee balance" value={ugx(home.finance.balance)} />
         <Metric label="Amount paid" value={ugx(home.finance.paid)} />
-        <Metric label="Latest result" value={home.latestReport ? `${home.latestReport.grade} - ${home.latestReport.averageScore}` : "Pending"} />
+        <Metric label="Latest result" value={home.latestReport ? `Average ${home.latestReport.averageScore} \u00b7 Grade ${home.latestReport.grade}` : "Pending"} />
       </section>
       <section className="dashboard-grid">
         <article className="panel">
@@ -341,52 +340,81 @@ function HomeView({ home }: { home: PortalHome | null }) {
 function AcademicsView({ data, student }: { data: any; student?: StudentIdentity }) {
   const marks = data?.marks ?? [];
   const cards = data?.reportCards ?? [];
-  const marksByAssessment = groupBy(marks, (mark: any) => mark.assessment?.examination?.name ?? mark.assessment?.name ?? "Published marks");
+  const marksByAssessment = groupBy(marks, (mark: any) => assessmentLabel(mark.assessment?.name ?? mark.assessment?.examination?.name ?? "Published assessment"));
   if (!data) return <LoadingState title="Loading academics" />;
   return (
     <>
-      <SectionTitle eyebrow="Uganda grading" title="Academics" helper="Published marks and report cards use D1-F9 grade boundaries." action={<button type="button" className="ghost no-print" onClick={printPage}>Print</button>} />
-      <PrintHeader title="Academic Results / Report Card" student={student} />
-      <section className="panel grading-panel">
-        <h3>Grading guide</h3>
-        <p>Uganda grades run from D1 as the strongest performance through F9. A higher score usually maps to a lower grade number.</p>
-        <div className="grade-scale" aria-label="Uganda grading scale">
-          {["D1", "D2", "C3", "C4", "C5", "C6", "P7", "P8", "F9"].map((grade) => <span key={grade}>{grade}</span>)}
-        </div>
-      </section>
-      <section className="stack">
-        <SectionTitle eyebrow="Marks" title="Published marks" helper="Grouped by assessment so each result is easier to scan." />
-        {marks.length === 0 ? <EmptyState title="No published marks yet" helper="Marks will appear here after teachers publish them to the portal." /> : Object.entries(marksByAssessment).map(([assessment, rows]) => (
-          <article className="panel" key={assessment}>
-            <h3>{assessment}</h3>
-            <DataTable
-              caption={assessment}
-              columns={[
-                { heading: "Subject", render: (mark: any) => mark.subject?.name ?? "Subject" },
-                { heading: "Score", align: "right", render: (mark: any) => mark.score },
-                { heading: "Grade", render: (mark: any) => mark.grade ?? "N/A" }
-              ]}
-              empty="No published marks yet."
-              rows={rows as any[]}
-            />
-          </article>
-        ))}
-      </section>
-      <section className="stack">
-        <SectionTitle eyebrow="Reports" title="Report cards" helper="Official published summaries for printing or review." />
-        {cards.length === 0 ? <EmptyState title="No report cards published yet" helper="Published report cards will appear here when the school releases them." /> : (
-          <div className="card-grid">
-            {cards.map((card: any) => (
-              <article className="result-card" key={card.id}>
-                <span>{dateLabel(card.generatedAt)}</span>
-                <strong>Grade {card.grade ?? "N/A"}</strong>
-                <p>Average {Number(card.averageScore ?? 0).toFixed(0)}</p>
-              </article>
-            ))}
+      <section className="academics-screen screen-only">
+        <SectionTitle eyebrow="Uganda grading" title="Academics" helper="Published marks and report cards use D1-F9 grade boundaries." action={<button type="button" className="ghost no-print" onClick={printPage}>Print report card</button>} />
+        <details className="panel grading-panel">
+          <summary>Grading guide (D1-F9)</summary>
+          <p>Uganda grades run from D1 as the strongest performance through F9. A higher score usually maps to a lower grade number.</p>
+          <div className="grade-scale" aria-label="Uganda grading scale">
+            {["D1", "D2", "C3", "C4", "C5", "C6", "P7", "P8", "F9"].map((grade) => <span key={grade}>{grade}</span>)}
           </div>
-        )}
+        </details>
+        <section className="stack">
+          <SectionTitle eyebrow="Marks" title="Published marks" helper="Grouped by assessment so each result is easier to scan." />
+          {marks.length === 0 ? <EmptyState title="No published marks yet" helper="Marks will appear here after teachers publish them to the portal." /> : Object.entries(marksByAssessment).map(([assessment, rows]) => (
+            <article className="panel" key={assessment}>
+              <h3>{assessment}</h3>
+              <DataTable
+                caption="Subject results"
+                columns={[
+                  { heading: "Subject", render: (mark: any) => mark.subject?.name ?? "Subject" },
+                  { heading: "Score", align: "right", render: (mark: any) => mark.score },
+                  { heading: "Grade", render: (mark: any) => mark.grade ?? "N/A" }
+                ]}
+                empty="No published marks yet."
+                rows={rows as any[]}
+              />
+            </article>
+          ))}
+        </section>
+        <section className="stack">
+          <SectionTitle eyebrow="Reports" title="Report cards" helper="Official published summaries for printing or review." />
+          {cards.length === 0 ? <EmptyState title="No report cards published yet" helper="Published report cards will appear here when the school releases them." /> : (
+            <div className="card-grid">
+              {cards.map((card: any) => (
+                <article className="result-card" key={card.id}>
+                  <span>{dateLabel(card.generatedAt)}</span>
+                  <strong>Grade {card.grade ?? "N/A"}</strong>
+                  <p>Average {Number(card.averageScore ?? 0).toFixed(0)}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
       </section>
+      <ReportCardPrint student={student} marks={marks} cards={cards} />
     </>
+  );
+}
+
+function ReportCardPrint({ student, marks, cards }: { student?: StudentIdentity; marks: any[]; cards: any[] }) {
+  const className = [student?.currentClass?.name, student?.currentStream?.name].filter(Boolean).join(" ");
+  const latestCard = cards[0];
+  const average = latestCard?.averageScore ?? averageScore(marks);
+  const grade = latestCard?.grade;
+  return (
+    <article className="print-only report-print-card">
+      <header>
+        <p className="report-school">Satelite Secondary School</p>
+        <h1>Student Report Card</h1>
+        <p className="report-period">Current published academic record</p>
+      </header>
+      <dl className="report-identity">
+        <div><dt>Student</dt><dd>{student ? `${student.firstName} ${student.lastName}` : "Portal student"}</dd></div>
+        <div><dt>Admission no.</dt><dd>{student?.admissionNo ?? "Unavailable"}</dd></div>
+        <div><dt>Class & stream</dt><dd>{className || "Unavailable"}</dd></div>
+        <div><dt>Summary</dt><dd>{average !== undefined && average !== null ? `Average ${Number(average).toFixed(0)}${grade ? ` \u00b7 Grade ${grade}` : ""}` : "Published results"}</dd></div>
+      </dl>
+      <table className="report-results">
+        <thead><tr><th>Subject</th><th>Assessment</th><th>Score</th><th>Grade</th></tr></thead>
+        <tbody>{marks.map((mark: any) => <tr key={mark.id}><td>{mark.subject?.name ?? "Subject"}</td><td>{assessmentLabel(mark.assessment?.name ?? mark.assessment?.examination?.name ?? "Published assessment")}</td><td>{mark.score ?? "-"}</td><td>{mark.grade ?? "-"}</td></tr>)}</tbody>
+      </table>
+      <footer><span>Generated {dateLabel(new Date())}</span><span>School signature: ____________________</span></footer>
+    </article>
   );
 }
 
@@ -483,15 +511,17 @@ function TimetableView({ rows }: { rows: any[] }) {
 }
 
 function MoreView({ setActive, logout, unread, student }: { setActive: (view: string) => void; logout: () => void; unread: number; student?: StudentIdentity }) {
+  if (!student) return <LoadingState title="Loading account details" helper="Preparing the learner account details." />;
+  const className = [student.currentClass?.name, student.currentStream?.name].filter(Boolean).join(" ");
   return (
     <section className="account-view">
       <SectionTitle eyebrow="Account" title="Portal account" helper="You are viewing information for this learner." />
       <article className="panel account-summary">
         <p className="eyebrow">Student identity</p>
-        <h3>{student ? `${student.firstName} ${student.lastName}` : "Student portal"}</h3>
+        <h3>{student.firstName} {student.lastName}</h3>
         <dl className="detail-list">
-          <div><dt>Admission number</dt><dd>{student?.admissionNo ?? "Loading"}</dd></div>
-          <div><dt>Class</dt><dd>{[student?.currentClass?.name, student?.currentStream?.name].filter(Boolean).join(" ") || "Not assigned"}</dd></div>
+          <div><dt>Admission number</dt><dd>{student.admissionNo || "Unavailable"}</dd></div>
+          <div><dt>Class</dt><dd>{className || "Class details are not yet available"}</dd></div>
         </dl>
       </article>
       <div className="more-grid">
@@ -595,7 +625,7 @@ async function api<T>(path: string, token: string | null, options?: { method?: s
     });
   } catch (error) {
     console.error(error);
-    throw new PortalApiError("Cannot reach the school server. Check that the PC server is running and that your phone is on the same Wi-Fi.", String(error));
+    throw new PortalApiError("We couldn’t connect to the school service. Check your internet connection and try again.", String(error));
   }
   if (!response.ok) {
     await response.text();
@@ -643,7 +673,21 @@ function isoDateTime(value?: string | Date | null) {
 
 function dayLabel(value: number | string) {
   const day = Number(value);
-  return Number.isFinite(day) ? `Day ${day}` : "School day";
+  const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+  return Number.isInteger(day) && day >= 1 && day <= weekdays.length ? weekdays[day - 1] : "School day";
+}
+
+function assessmentLabel(value: string) {
+  return value
+    .replace(/\bacceptance(?:\s+exam)?(?:\s+\d{8,})?\b/gi, "Term assessment")
+    .replace(/\s+\d{8,}\b/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim() || "Published assessment";
+}
+
+function averageScore(marks: any[]) {
+  const scores = marks.map((mark) => Number(mark.score)).filter(Number.isFinite);
+  return scores.length ? scores.reduce((total, score) => total + score, 0) / scores.length : undefined;
 }
 
 function subjectName(row: { subject?: { name?: string | null; code?: string | null } | null; subjectId?: string }) {
@@ -699,6 +743,11 @@ function printPage() {
 
 function title(value: string) {
   return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+function mobileNavLabel(view: (typeof primaryViews)[number], unread: number) {
+  const labels: Record<(typeof primaryViews)[number], string> = { home: "Home", academics: "Learn", finance: "Fees", timetable: "Schedule", more: "More" };
+  return view === "more" && unread ? `More (${unread})` : labels[view];
 }
 
 function readableError(error: unknown): PortalIssue {
